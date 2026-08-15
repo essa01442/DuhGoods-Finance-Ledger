@@ -10,6 +10,42 @@ import {
 } from 'fyo/utils/consts';
 import tape from 'tape';
 
+// Allowlist for legitimate technical tokens, product names, email/URL examples, and abbreviations
+const ALLOWLIST = new Set([
+  'SAR',
+  'INR',
+  'USD',
+  'EUR',
+  'PDF',
+  'CSV',
+  'XLSX',
+  'ID',
+  'URL',
+  'HTTP',
+  'HTTPS',
+  'GSTIN',
+  'HSN',
+  'SAC',
+  'POS',
+  'ERPNext',
+  'Frappe Books',
+  'Inter',
+  'Segoe UI',
+  'Roboto',
+  'Helvetica Neue',
+  'Arial',
+  'Times New Roman',
+  '23 Mar, 2022',
+  'HSN/SAC',
+  'john@doe.com',
+  'lin@lthings.com',
+  'test@example.com',
+  'http://localhost:3000',
+  'http://',
+  'https://',
+]);
+
+
 tape('Arabic Localization Validation Suite', (t) => {
   t.test('Assert clean-install defaults', (st) => {
     st.equal(DEFAULT_LANGUAGE, 'Arabic', 'DEFAULT_LANGUAGE is Arabic');
@@ -23,6 +59,7 @@ tape('Arabic Localization Validation Suite', (t) => {
     st.end();
   });
 
+  t.test('Verify translations/ar.csv integrity & completeness', (st) => {
   t.test('Verify translations/ar.csv integrity', (st) => {
     const csvPath = path.resolve(__dirname, '../translations/ar.csv');
     st.ok(fs.existsSync(csvPath), 'translations/ar.csv exists');
@@ -33,6 +70,7 @@ tape('Arabic Localization Validation Suite', (t) => {
 
     const emptyRows: string[] = [];
     const placeholderMismatches: string[] = [];
+    const suspiciousIdentical: string[] = [];
 
     for (const [src, tr] of rows) {
       if (!tr || tr.trim() === '') {
@@ -44,6 +82,14 @@ tape('Arabic Localization Validation Suite', (t) => {
       if (srcMatches.join(',') !== trMatches.join(',')) {
         placeholderMismatches.push(`Source: "${src}" | Translation: "${tr}"`);
       }
+
+      // Check for untranslated normal English prose (where src == tr and not allowlisted)
+      if (src === tr && !ALLOWLIST.has(src) && !/^\$\{?\d+\}?$/.test(src)) {
+        // If it contains normal English alphabetical words, flag it
+        if (/[a-zA-Z]{3,}/.test(src)) {
+          suspiciousIdentical.push(src);
+        }
+      }
     }
 
     st.equal(emptyRows.length, 0, 'No empty translations in ar.csv');
@@ -51,6 +97,13 @@ tape('Arabic Localization Validation Suite', (t) => {
       placeholderMismatches.length,
       0,
       'No interpolation placeholder mismatches'
+    );
+    st.equal(
+      suspiciousIdentical.length,
+      0,
+      `No unallowlisted identical English source/translation strings (Found: ${suspiciousIdentical
+        .slice(0, 5)
+        .join(', ')})`
     );
     st.end();
   });
