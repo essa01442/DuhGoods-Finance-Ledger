@@ -8,7 +8,7 @@
         v-if="schema?.naming !== 'random' && !schema?.isChild"
         class="font-semibold text-base text-gray-900 dark:text-gray-25"
       >
-        {{ name }}
+        <Bdi :value="name" />
       </p>
       <p class="font-semibold text-base text-gray-600 dark:text-gray-400">
         {{ schema?.label ?? '' }}
@@ -32,8 +32,10 @@
 import { isFalsy } from 'fyo/utils';
 import { Field } from 'schemas/types';
 import { defineComponent } from 'vue';
+import Bdi from './Bdi.vue';
 
 export default defineComponent({
+  components: { Bdi },
   props: {
     schemaName: { type: String, required: true },
     name: { type: String, required: true },
