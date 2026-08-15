@@ -1,7 +1,13 @@
 import { parseCSV } from '../utils/csvParser';
 import fs from 'fs';
 import path from 'path';
-import { DEFAULT_COUNTRY_CODE, DEFAULT_CURRENCY, DEFAULT_LANGUAGE, DEFAULT_LOCALE, RTL_LANGUAGES } from 'fyo/utils/consts';
+import {
+  DEFAULT_COUNTRY_CODE,
+  DEFAULT_CURRENCY,
+  DEFAULT_LANGUAGE,
+  DEFAULT_LOCALE,
+  RTL_LANGUAGES,
+} from 'fyo/utils/consts';
 import tape from 'tape';
 
 tape('Arabic Localization Validation Suite', (t) => {
@@ -10,7 +16,10 @@ tape('Arabic Localization Validation Suite', (t) => {
     st.equal(DEFAULT_COUNTRY_CODE, 'sa', 'DEFAULT_COUNTRY_CODE is sa');
     st.equal(DEFAULT_CURRENCY, 'SAR', 'DEFAULT_CURRENCY is SAR');
     st.equal(DEFAULT_LOCALE, 'ar-SA', 'DEFAULT_LOCALE is ar-SA');
-    st.ok(RTL_LANGUAGES.includes('Arabic'), 'Arabic is included in RTL_LANGUAGES');
+    st.ok(
+      RTL_LANGUAGES.includes('Arabic'),
+      'Arabic is included in RTL_LANGUAGES'
+    );
     st.end();
   });
 
@@ -38,7 +47,11 @@ tape('Arabic Localization Validation Suite', (t) => {
     }
 
     st.equal(emptyRows.length, 0, 'No empty translations in ar.csv');
-    st.equal(placeholderMismatches.length, 0, 'No interpolation placeholder mismatches');
+    st.equal(
+      placeholderMismatches.length,
+      0,
+      'No interpolation placeholder mismatches'
+    );
     st.end();
   });
 });

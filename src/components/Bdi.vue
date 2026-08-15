@@ -1,5 +1,7 @@
 <template>
-  <bdi class="unicode-isolate" dir="ltr"><slot>{{ value }}</slot></bdi>
+  <bdi class="unicode-isolate" dir="ltr"
+    ><slot>{{ value }}</slot></bdi
+  >
 </template>
 
 <script lang="ts">

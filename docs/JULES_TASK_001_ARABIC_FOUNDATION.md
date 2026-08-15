@@ -4,6 +4,7 @@ Repository: `essa01442/DuhGoods-Finance-Ledger`
 Branch: `build/duhgoods-finance-ledger`
 
 Upstream baseline:
+
 - Project: `frappe/books`
 - Baseline master commit when the private repository was created:
   `7c35767811762e59573f62bfff936cb9e3016bda`
@@ -116,6 +117,7 @@ Use logical direction-aware layout.
 Mixed Arabic/Latin values must remain readable.
 
 Create a reusable LTR/directional-isolation treatment/component if the codebase needs one for:
+
 - IDs
 - hashes
 - paths
