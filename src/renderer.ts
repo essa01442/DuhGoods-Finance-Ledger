@@ -14,11 +14,9 @@ import { setLanguageMap } from './utils/language';
 
 // eslint-disable-next-line @typescript-eslint/no-floating-promises
 (async () => {
-  const language = fyo.config.get('language') as string;
-  if (language) {
-    await setLanguageMap(language);
-  }
-  fyo.store.language = language || 'English';
+  const language = (fyo.config.get('language') as string) || 'Arabic';
+  await setLanguageMap(language);
+  fyo.store.language = language;
 
   registerIpcRendererListeners();
   const { isDevelopment, platform, version } = await ipc.getEnv();
