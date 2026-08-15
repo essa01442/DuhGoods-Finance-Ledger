@@ -45,7 +45,6 @@ const ALLOWLIST = new Set([
   'https://',
 ]);
 
-
 tape('Arabic Localization Validation Suite', (t) => {
   t.test('Assert clean-install defaults', (st) => {
     st.equal(DEFAULT_LANGUAGE, 'Arabic', 'DEFAULT_LANGUAGE is Arabic');
@@ -60,7 +59,6 @@ tape('Arabic Localization Validation Suite', (t) => {
   });
 
   t.test('Verify translations/ar.csv integrity & completeness', (st) => {
-  t.test('Verify translations/ar.csv integrity', (st) => {
     const csvPath = path.resolve(__dirname, '../translations/ar.csv');
     st.ok(fs.existsSync(csvPath), 'translations/ar.csv exists');
 
@@ -68,11 +66,28 @@ tape('Arabic Localization Validation Suite', (t) => {
     const rows = parseCSV(csvContent);
     st.ok(rows.length > 1000, `CSV contains ${rows.length} rows`);
 
+    const keyMap = new Map<string, string>();
+    const duplicateKeys: string[] = [];
+    const missingRows: string[] = [];
     const emptyRows: string[] = [];
     const placeholderMismatches: string[] = [];
     const suspiciousIdentical: string[] = [];
+    let allowlistedCount = 0;
 
     for (const [src, tr] of rows) {
+      if (!src && src !== '') {
+        missingRows.push('(null or undefined source key)');
+        continue;
+      }
+
+      if (keyMap.has(src)) {
+        duplicateKeys.push(
+          `Key: "${src}" | Existing: "${keyMap.get(src)}" | New: "${tr}"`
+        );
+      } else {
+        keyMap.set(src, tr);
+      }
+
       if (!tr || tr.trim() === '') {
         emptyRows.push(src);
       }
@@ -83,15 +98,36 @@ tape('Arabic Localization Validation Suite', (t) => {
         placeholderMismatches.push(`Source: "${src}" | Translation: "${tr}"`);
       }
 
-      // Check for untranslated normal English prose (where src == tr and not allowlisted)
-      if (src === tr && !ALLOWLIST.has(src) && !/^\$\{?\d+\}?$/.test(src)) {
-        // If it contains normal English alphabetical words, flag it
-        if (/[a-zA-Z]{3,}/.test(src)) {
+      // Check for untranslated normal English prose (where src == tr)
+      if (src === tr) {
+        if (ALLOWLIST.has(src) || /^\$\{?\d+\}?$/.test(src)) {
+          allowlistedCount++;
+        } else if (/[a-zA-Z]{3,}/.test(src)) {
           suspiciousIdentical.push(src);
         }
       }
     }
 
+    /* eslint-disable no-console */
+    console.log(`Arabic CSV Audit Statistics:`);
+    console.log(`  Total rows: ${rows.length}`);
+    console.log(`  Unique source keys: ${keyMap.size}`);
+    console.log(`  Duplicate source keys: ${duplicateKeys.length}`);
+    console.log(`  Missing translations: ${missingRows.length}`);
+    console.log(`  Empty translations: ${emptyRows.length}`);
+    console.log(`  Placeholder mismatches: ${placeholderMismatches.length}`);
+    console.log(
+      `  Suspicious untranslated English strings: ${suspiciousIdentical.length}`
+    );
+    console.log(`  Allowlisted strings: ${allowlistedCount}`);
+    /* eslint-enable no-console */
+
+    st.equal(missingRows.length, 0, 'No missing rows in ar.csv');
+    st.equal(
+      duplicateKeys.length,
+      0,
+      `No duplicate source keys in ar.csv (Found: ${duplicateKeys.length})`
+    );
     st.equal(emptyRows.length, 0, 'No empty translations in ar.csv');
     st.equal(
       placeholderMismatches.length,
