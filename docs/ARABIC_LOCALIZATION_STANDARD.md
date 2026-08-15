@@ -67,6 +67,75 @@ Prefer concise financial/accounting terminology over verbose explanatory prose.
 
 Use these translations consistently unless a later approved glossary revision changes them.
 
+| English | Canonical Arabic |
+|---|---|
+| Accounting | المحاسبة |
+| Account | الحساب |
+| Chart of Accounts | دليل الحسابات |
+| General Ledger | دفتر الأستاذ العام |
+| Ledger Entry | قيد دفتر الأستاذ |
+| Journal Entry | قيد يومية |
+| Journal Entries | قيود اليومية |
+| Trial Balance | ميزان المراجعة |
+| Balance Sheet | قائمة المركز المالي |
+| Profit and Loss | قائمة الدخل |
+| Income | الإيرادات |
+| Revenue | الإيرادات |
+| Expense | المصروف |
+| Expenses | المصروفات |
+| Asset | أصل |
+| Assets | الأصول |
+| Liability | التزام |
+| Liabilities | الالتزامات |
+| Equity | حقوق الملكية |
+| Debit | مدين |
+| Credit | دائن |
+| Accounts Receivable | الحسابات المدينة |
+| Accounts Payable | الحسابات الدائنة |
+| Sales | المبيعات |
+| Purchases | المشتريات |
+| Sales Invoice | فاتورة مبيعات |
+| Purchase Invoice | فاتورة مشتريات |
+| Payment | دفعة |
+| Payments | المدفوعات |
+| Refund | استرداد |
+| Chargeback | اعتراض على عملية / استرداد قسري |
+| Settlement | تسوية |
+| Reconciliation | مطابقة |
+| Reconciled | مطابق |
+| Unreconciled | غير مطابق |
+| Currency | العملة |
+| Exchange Rate | سعر الصرف |
+| Exchange Gain/Loss | أرباح/خسائر فروق العملة |
+| Tax | الضريبة |
+| VAT | ضريبة القيمة المضافة |
+| Input VAT | ضريبة المدخلات |
+| Output VAT | ضريبة المخرجات |
+| Taxable Amount | المبلغ الخاضع للضريبة |
+| Zero-rated | خاضع لنسبة الصفر |
+| Export Sales | مبيعات التصدير |
+| Domestic Sales | المبيعات المحلية |
+| Tax Invoice | فاتورة ضريبية |
+| Tax Summary | ملخص الضريبة |
+| Fiscal Year | السنة المالية |
+| Posting Date | تاريخ القيد |
+| Outstanding Amount | المبلغ المستحق |
+| Gross Amount | المبلغ الإجمالي |
+| Net Amount | صافي المبلغ |
+| Fee | رسوم |
+| Payment Gateway Fees | رسوم بوابة الدفع |
+| Bank Fees | الرسوم البنكية |
+| Cash Flow | التدفق النقدي |
+| Import | استيراد |
+| Export | تصدير |
+| Report | تقرير |
+| Reports | التقارير |
+| Dashboard | لوحة القيادة |
+| Settings | الإعدادات |
+| Review Required | يتطلب مراجعة |
+| Warning | تحذير |
+| Error | خطأ |
+| Success | نجاح |
 | English              | Canonical Arabic                |
 | -------------------- | ------------------------------- |
 | Accounting           | المحاسبة                        |
