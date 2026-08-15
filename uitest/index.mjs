@@ -8,22 +8,23 @@ const root = path.join(dirname, '..');
 const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
 
 (async function run() {
-  const electronApp = await _electron.launch({ args: [appSourcePath] });
+  const electronApp = await _electron.launch({
+    args: ['--no-sandbox', '--disable-gpu', appSourcePath],
+  });
   const window = await electronApp.firstWindow();
   window.setDefaultTimeout(60_000);
 
-  test('load app', async (t) => {
+  test('load app & verify RTL default', async (t) => {
     t.equal(await window.title(), 'Frappe Books', 'title matches');
 
     await new Promise((r) => window.once('load', () => r()));
     t.ok(true, 'window has loaded');
+
+    const appDir = await window.getAttribute('#app', 'dir');
+    t.equal(appDir, 'rtl', 'clean install initial paint is RTL');
   });
 
   test('navigate to database selector', async (t) => {
-    /**
-     * When running on local, Frappe Books will open
-     * the last selected database.
-     */
     const changeDb = window.getByTestId('change-db');
     const createNew = window.getByTestId('create-new-file');
 
@@ -43,7 +44,7 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
     t.ok(await createNew.isVisible(), 'create new is visible');
   });
 
-  test('fill setup form', async (t) => {
+  test('fill setup form for Saudi Arabia', async (t) => {
     await window.getByTestId('create-new-file').click();
     await window.getByTestId('submit-button').waitFor();
 
@@ -53,18 +54,32 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
       'submit button is disabled before form fill'
     );
 
-    await window.getByPlaceholder('Company Name').fill('Test Company');
-    await window.getByPlaceholder('John Doe').fill('Test Owner');
-    await window.getByPlaceholder('john@doe.com').fill('test@example.com');
-    await window.getByPlaceholder('Select Country').fill('India');
-    await window.getByPlaceholder('Select Country').blur();
-    await window.getByPlaceholder('Prime Bank').fill('Test Bank');
-    await window.getByPlaceholder('Prime Bank').blur();
+    const companyNameInput = window
+      .getByPlaceholder('Company Name')
+      .or(window.getByPlaceholder('اسم الشركة'));
+    const ownerInput = window
+      .getByPlaceholder('John Doe')
+      .or(window.getByPlaceholder('فلان الفلاني'));
+    const emailInput = window.getByPlaceholder('john@doe.com');
+    const countryInput = window
+      .getByPlaceholder('Select Country')
+      .or(window.getByPlaceholder('تحديد الدولة'));
+    const bankInput = window
+      .getByPlaceholder('Prime Bank')
+      .or(window.getByPlaceholder('البنك الرئيسي'));
+
+    await companyNameInput.fill('شركة ده بضائع');
+    await ownerInput.fill('مدير النظام');
+    await emailInput.fill('info@duhgoods.com');
+    await countryInput.fill('Saudi Arabia');
+    await countryInput.blur();
+    await bankInput.fill('البنك الأهلي السعودي');
+    await bankInput.blur();
 
     t.equal(
       await window.getByTestId('submit-button').isDisabled(),
       false,
-      'submit button enabled after form fill'
+      'submit button enabled after form fill for Saudi Arabia'
     );
   });
 
@@ -72,7 +87,7 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
     await window.getByTestId('submit-button').click();
     t.equal(
       await window.getByTestId('company-name').innerText(),
-      'Test Company',
+      'شركة ده بضائع',
       'new instance created, company name found in sidebar'
     );
   });

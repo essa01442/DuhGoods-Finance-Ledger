@@ -1768,7 +1768,10 @@
     "currency_fraction_units": 100,
     "currency_name": "Saudi Riyal",
     "currency_symbol": "﷼",
+    "date_format": "dd/MM/yyyy",
     "timezones": ["Asia/Riyadh"],
+    "fiscal_year_start": "01-01",
+    "fiscal_year_end": "12-31",
     "locale": "ar-SA"
   },
   "Senegal": {

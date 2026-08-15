@@ -184,11 +184,11 @@ export default defineComponent({
         return;
       }
 
-      await this.doc.set('companyName', "Lin's Things");
-      await this.doc.set('email', 'lin@lthings.com');
-      await this.doc.set('fullname', 'Lin Slovenly');
-      await this.doc.set('bankName', 'Max Finance');
-      await this.doc.set('country', 'India');
+      await this.doc.set('companyName', 'شركة ده بضائع');
+      await this.doc.set('email', 'info@duhgoods.com');
+      await this.doc.set('fullname', 'مدير النظام');
+      await this.doc.set('bankName', 'البنك الأهلي السعودي');
+      await this.doc.set('country', 'Saudi Arabia');
     },
     async onValueChange(field: Field, value: DocValue) {
       if (!this.hasDoc) {
