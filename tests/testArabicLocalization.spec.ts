@@ -45,6 +45,7 @@ const ALLOWLIST = new Set([
   'https://',
 ]);
 
+
 tape('Arabic Localization Validation Suite', (t) => {
   t.test('Assert clean-install defaults', (st) => {
     st.equal(DEFAULT_LANGUAGE, 'Arabic', 'DEFAULT_LANGUAGE is Arabic');
@@ -59,6 +60,7 @@ tape('Arabic Localization Validation Suite', (t) => {
   });
 
   t.test('Verify translations/ar.csv integrity & completeness', (st) => {
+  t.test('Verify translations/ar.csv integrity', (st) => {
     const csvPath = path.resolve(__dirname, '../translations/ar.csv');
     st.ok(fs.existsSync(csvPath), 'translations/ar.csv exists');
 
