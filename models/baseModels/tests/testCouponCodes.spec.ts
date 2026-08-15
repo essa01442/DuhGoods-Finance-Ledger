@@ -71,6 +71,7 @@ const pricingRuleMap = [
     priority: '1',
   },
 ];
+
 const couponCodesMap = [
   {
     name: 'COUPON1',
@@ -101,7 +102,7 @@ const locationMap = {
   LocationOne: 'LocationOne',
 };
 
-test(' Coupon Codes: create dummy item, party, pricing rules, coupon codes', async (t) => {
+test('Coupon Codes: create dummy item, party, pricing rules, coupon codes', async (t) => {
   // Create Items
   for (const { name, rate } of Object.values(itemMap)) {
     const item = getItem(name, rate, false);
@@ -214,6 +215,7 @@ test('Coupon code not created: coupons min amount must be lesser than coupons ma
     async () => await ccodeDoc.sync(),
     'Minimum Amount should be less than the Maximum Amount'
   );
+  t.pass('throws error when min amount > max amount');
 });
 
 test('Coupon code not created: pricing rules max amount is lower than the coupons min.', async (t) => {
@@ -228,6 +230,7 @@ test('Coupon code not created: pricing rules max amount is lower than the coupon
     async () => await ccodeDoc.sync(),
     "Minimum Amount should be greather than the Pricing Rule's Minimum Amount"
   );
+  t.pass('throws error when coupon min amount < pricing rule min amount');
 });
 
 test('coupon code not created: pricing rules max amount is lower than the coupons max.', async (t) => {
@@ -242,6 +245,7 @@ test('coupon code not created: pricing rules max amount is lower than the coupon
     async () => await ccodeDoc.sync(),
     "Maximum Amount should be lesser than Pricing Rule's Maximum Amount"
   );
+  t.pass('throws error when coupon max amount > pricing rule max amount');
 });
 
 test("coupon code is not applied when coupon's validfrom date < coupon's validTo date", async (t) => {
@@ -258,6 +262,7 @@ test("coupon code is not applied when coupon's validfrom date < coupon's validTo
     async () => await ccodeDoc.sync(),
     'Valid From Date should be less than Valid To Date'
   );
+  t.pass('throws error when validTo date < validFrom date');
 });
 
 test("coupon code is not applied when coupon's validFrom date < pricing rule's validFrom date", async (t) => {
@@ -272,6 +277,7 @@ test("coupon code is not applied when coupon's validFrom date < pricing rule's v
     async () => await ccodeDoc.sync(),
     "Valid From Date should be greather than Pricing Rule's Valid From Date"
   );
+  t.pass('throws error when coupon validFrom < pricing rule validFrom');
 });
 
 test("coupon code is not applied when coupon's validTo date > pricing rule's validTo date", async (t) => {
@@ -287,6 +293,7 @@ test("coupon code is not applied when coupon's validTo date > pricing rule's val
     async () => await ccodeDoc.sync(),
     "Valid To Date should be lesser than Pricing Rule's Valid To Date"
   );
+  t.pass('throws error when coupon validTo > pricing rule validTo');
 });
 
 test('apply coupon code', async (t) => {
