@@ -164,18 +164,22 @@ export default defineComponent({
       await this.searcher.initializeKeywords();
     },
     async setDesk(filePath: string): Promise<void> {
+      /* eslint-disable no-console */
+      console.log('SET DESK CALLED for path:', filePath);
       await setLanguageMap();
       this.activeScreen = Screen.Desk;
       await this.setDeskRoute();
       await fyo.telemetry.start(true);
-      await ipc.checkForUpdates();
       this.dbPath = filePath;
       this.companyName = (await fyo.getValue(
         ModelNameEnum.AccountingSettings,
         'companyName'
       )) as string;
+      console.log('DESK COMPANY NAME:', this.companyName);
       await this.setSearcher();
       updateConfigFiles(fyo);
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      ipc.checkForUpdates();
     },
     newDatabase() {
       this.activeScreen = Screen.SetupWizard;
@@ -202,11 +206,19 @@ export default defineComponent({
       }
     },
     async setupComplete(setupWizardOptions: SetupWizardOptions): Promise<void> {
+      /* eslint-disable no-console */
+      console.log(
+        'SETUP COMPLETE STARTED options:',
+        JSON.stringify(setupWizardOptions)
+      );
       const companyName = setupWizardOptions.companyName;
       const filePath = await ipc.getDbDefaultPath(companyName);
+      console.log('GOT DB DEFAULT PATH:', filePath);
       await setupInstance(filePath, setupWizardOptions, fyo);
+      console.log('SETUP INSTANCE FINISHED');
       fyo.config.set('lastSelectedFilePath', filePath);
       await this.setDesk(filePath);
+      console.log('DESK READY');
     },
     async showSetupWizardOrDesk(filePath: string): Promise<void> {
       const { countryCode, error, actionSymbol } = await connectToDatabase(

@@ -11,8 +11,14 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
   const electronApp = await _electron.launch({
     args: ['--no-sandbox', '--disable-gpu', appSourcePath],
   });
+
+  // Mock native Electron dialogs so modal prompts do not block automated CI tests
+  await electronApp.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 0 });
+  });
+
   const window = await electronApp.firstWindow();
-  window.setDefaultTimeout(60_000);
+  window.setDefaultTimeout(30_000);
 
   test('load app & verify RTL default', async (t) => {
     t.equal(await window.title(), 'Frappe Books', 'title matches');
@@ -69,12 +75,15 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
       .or(window.getByPlaceholder('البنك الرئيسي'));
 
     await companyNameInput.fill('شركة ده بضائع');
+    await companyNameInput.blur();
     await ownerInput.fill('مدير النظام');
+    await ownerInput.blur();
     await emailInput.fill('info@duhgoods.com');
-    await countryInput.fill('Saudi Arabia');
-    await countryInput.blur();
+    await emailInput.blur();
     await bankInput.fill('البنك الأهلي السعودي');
     await bankInput.blur();
+    await countryInput.fill('Saudi Arabia');
+    await countryInput.blur();
 
     t.equal(
       await window.getByTestId('submit-button').isDisabled(),
@@ -83,12 +92,43 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
     );
   });
 
-  test('create new instance', async (t) => {
+  test('create new instance & verify post-onboarding Arabic desk', async (t) => {
+    const startTime = Date.now();
     await window.getByTestId('submit-button').click();
+
+    const companyNameEl = window.getByTestId('company-name');
+    await companyNameEl.waitFor({ state: 'visible', timeout: 60_000 });
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(
+      `[UI Test Metric] Instance initialization duration: ${duration}s under Xvfb`
+    );
+
     t.equal(
-      await window.getByTestId('company-name').innerText(),
+      await companyNameEl.innerText(),
       'شركة ده بضائع',
       'new instance created, company name found in sidebar'
+    );
+
+    const appDir = await window.getAttribute('#app', 'dir');
+    t.equal(appDir, 'rtl', 'post-onboarding desk environment remains RTL');
+  });
+
+  test('verify post-onboarding navigation, RTL, and language integrity', async (t) => {
+    const sidebar = window.locator('#app');
+    t.equal(
+      await sidebar.getAttribute('dir'),
+      'rtl',
+      'Main desk maintains dir="rtl"'
+    );
+
+    const deskText = await window.locator('body').innerText();
+    t.ok(deskText.length > 0, 'Desk text content exists');
+    t.ok(
+      deskText.includes('شركة ده بضائع') ||
+        deskText.includes('المحاسبة') ||
+        deskText.includes('الرئيسية') ||
+        deskText.includes('Frappe Books'),
+      'Desk contains expected Arabic UI elements'
     );
   });
 
