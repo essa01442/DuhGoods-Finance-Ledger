@@ -74,12 +74,6 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
     await countryInput.fill('Saudi Arabia');
     await countryInput.blur();
     await bankInput.fill('البنك الأهلي السعودي');
-    await companyNameInput.fill('Test Company');
-    await ownerInput.fill('Test Owner');
-    await emailInput.fill('test@example.com');
-    await countryInput.fill('Saudi Arabia');
-    await countryInput.blur();
-    await bankInput.fill('Test Bank');
     await bankInput.blur();
 
     t.equal(
