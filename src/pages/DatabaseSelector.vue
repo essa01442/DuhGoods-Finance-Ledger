@@ -188,7 +188,7 @@
                 whitespace-nowrap
               "
             >
-              {{ truncate(file.dbPath) }}
+              <Bdi :value="truncate(file.dbPath)" />
             </p>
           </div>
           <button
@@ -311,6 +311,7 @@ import { setupDummyInstance } from 'dummy';
 import { t } from 'fyo';
 import { Verb } from 'fyo/telemetry/types';
 import { DateTime } from 'luxon';
+import Bdi from 'src/components/Bdi.vue';
 import Button from 'src/components/Button.vue';
 import LanguageSelector from 'src/components/Controls/LanguageSelector.vue';
 import FeatherIcon from 'src/components/FeatherIcon.vue';
@@ -326,6 +327,7 @@ import { defineComponent } from 'vue';
 export default defineComponent({
   name: 'DatabaseSelector',
   components: {
+    Bdi,
     LanguageSelector,
     Loading,
     FeatherIcon,

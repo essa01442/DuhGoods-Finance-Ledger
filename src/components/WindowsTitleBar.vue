@@ -15,8 +15,11 @@
     style="height: 28px"
   >
     <Fb class="ms-2" />
-    <p v-if="companyName && dbPath" class="mx-auto text-sm">
-      {{ companyName }} - {{ dbPath }}
+    <p
+      v-if="companyName && dbPath"
+      class="mx-auto text-sm flex items-center gap-1"
+    >
+      <span>{{ companyName }}</span> - <Bdi :value="dbPath" />
     </p>
     <div
       v-if="!isFullscreen"
@@ -65,10 +68,11 @@
 
 <script>
 import Fb from './Icons/18/fb.vue';
+import Bdi from './Bdi.vue';
 
 export default {
   name: 'WindowsTitleBar',
-  components: { Fb },
+  components: { Fb, Bdi },
   props: {
     dbPath: String,
     companyName: String,
