@@ -47,8 +47,8 @@ const pricingRuleMap = [
     discountRate: 800,
     minQuantity: 4,
     maxQuantity: 6,
-    minAmount: fyo.pesa(4000),
-    maxAmount: fyo.pesa(6000),
+    minAmount: 4000,
+    maxAmount: 6000,
     validFrom: '2024-02-01',
     validTo: '2024-02-29',
     priority: '1',
@@ -79,8 +79,8 @@ const couponCodesMap = [
     pricingRule: pricingRuleMap[0].name,
     maximumUse: 5,
     used: 0,
-    minAmount: fyo.pesa(4000),
-    maxAmount: fyo.pesa(6000),
+    minAmount: 4000,
+    maxAmount: 6000,
     validFrom: '2024-02-01',
     validTo: '2024-02-29',
   },
@@ -203,7 +203,7 @@ test('disabled coupon codes is not applied', async (t) => {
 });
 
 test('Coupon code not created: coupons min amount must be lesser than coupons max.', async (t) => {
-  couponCodesMap[0].minAmount = fyo.pesa(7000);
+  couponCodesMap[0].minAmount = 7000;
 
   const ccodeDoc = fyo.doc.getNewDoc(
     ModelNameEnum.CouponCode,
@@ -217,7 +217,7 @@ test('Coupon code not created: coupons min amount must be lesser than coupons ma
 });
 
 test('Coupon code not created: pricing rules max amount is lower than the coupons min.', async (t) => {
-  couponCodesMap[0].minAmount = fyo.pesa(3000);
+  couponCodesMap[0].minAmount = 3000;
 
   const ccodeDoc = fyo.doc.getNewDoc(
     ModelNameEnum.CouponCode,
@@ -231,7 +231,7 @@ test('Coupon code not created: pricing rules max amount is lower than the coupon
 });
 
 test('coupon code not created: pricing rules max amount is lower than the coupons max.', async (t) => {
-  couponCodesMap[0].maxAmount = fyo.pesa(7000);
+  couponCodesMap[0].maxAmount = 7000;
 
   const ccodeDoc = fyo.doc.getNewDoc(
     ModelNameEnum.CouponCode,
@@ -245,8 +245,8 @@ test('coupon code not created: pricing rules max amount is lower than the coupon
 });
 
 test("coupon code is not applied when coupon's validfrom date < coupon's validTo date", async (t) => {
-  couponCodesMap[0].minAmount = fyo.pesa(4000);
-  couponCodesMap[0].maxAmount = fyo.pesa(6000);
+  couponCodesMap[0].minAmount = 4000;
+  couponCodesMap[0].maxAmount = 6000;
   couponCodesMap[0].validTo = '2024-01-10';
 
   const ccodeDoc = fyo.doc.getNewDoc(

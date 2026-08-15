@@ -53,13 +53,27 @@ const appSourcePath = path.join(root, 'dist_electron', 'build', 'main.js');
       'submit button is disabled before form fill'
     );
 
-    await window.getByPlaceholder('Company Name').fill('Test Company');
-    await window.getByPlaceholder('John Doe').fill('Test Owner');
-    await window.getByPlaceholder('john@doe.com').fill('test@example.com');
-    await window.getByPlaceholder('Select Country').fill('India');
-    await window.getByPlaceholder('Select Country').blur();
-    await window.getByPlaceholder('Prime Bank').fill('Test Bank');
-    await window.getByPlaceholder('Prime Bank').blur();
+    const companyNameInput = window
+      .getByPlaceholder('Company Name')
+      .or(window.getByPlaceholder('اسم الشركة'));
+    const ownerInput = window
+      .getByPlaceholder('John Doe')
+      .or(window.getByPlaceholder('فلان الفلاني'));
+    const emailInput = window.getByPlaceholder('john@doe.com');
+    const countryInput = window
+      .getByPlaceholder('Select Country')
+      .or(window.getByPlaceholder('تحديد الدولة'));
+    const bankInput = window
+      .getByPlaceholder('Prime Bank')
+      .or(window.getByPlaceholder('البنك الرئيسي'));
+
+    await companyNameInput.fill('Test Company');
+    await ownerInput.fill('Test Owner');
+    await emailInput.fill('test@example.com');
+    await countryInput.fill('Saudi Arabia');
+    await countryInput.blur();
+    await bankInput.fill('Test Bank');
+    await bankInput.blur();
 
     t.equal(
       await window.getByTestId('submit-button').isDisabled(),
