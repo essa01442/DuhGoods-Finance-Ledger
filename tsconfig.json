@@ -49,7 +49,8 @@
     "utils/**/*.ts",
     "tests/**/*.ts",
     "dummy/**/*.ts",
-    "jobs/**/*.ts"
+    "jobs/**/*.ts",
+    "duhgoods/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

@@ -162,6 +162,10 @@ export class Fyo {
     });
   }
 
+  async reinitializeMoneyMaker() {
+    await this.#initializeMoneyMaker();
+  }
+
   async close() {
     await this.db.close();
   }

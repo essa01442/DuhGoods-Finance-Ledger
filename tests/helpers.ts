@@ -10,6 +10,22 @@ import test from 'tape';
 import { getFiscalYear } from 'utils/misc';
 
 export function getTestSetupWizardOptions(): SetupWizardOptions {
+  const year = DateTime.local().year;
+  return {
+    logo: null,
+    companyName: 'Test Company',
+    country: 'Saudi Arabia',
+    fullname: 'Test Person',
+    email: 'test@testmyfantasy.com',
+    bankName: 'Test Bank of Scriptia',
+    currency: 'SAR',
+    fiscalYearStart: `${year}-01-01`,
+    fiscalYearEnd: `${year}-12-31`,
+    chartOfAccounts: 'Saudi Arabia - Chart of Accounts',
+  };
+}
+
+export function getIndiaTestSetupWizardOptions(): SetupWizardOptions {
   return {
     logo: null,
     companyName: 'Test Company',
@@ -66,6 +82,19 @@ export function setupTestFyo(fyo: Fyo, filename: string) {
 
   return test(`setup: ${testName}`, async () => {
     const options = getTestSetupWizardOptions();
+    const dbPath = getTestDbPath();
+    await setupInstance(dbPath, options, fyo);
+  });
+}
+
+export function setupTestFyoWith(
+  fyo: Fyo,
+  filename: string,
+  options: SetupWizardOptions
+) {
+  const testName = path.basename(filename, ext);
+
+  return test(`setup: ${testName}`, async () => {
     const dbPath = getTestDbPath();
     await setupInstance(dbPath, options, fyo);
   });

@@ -10,7 +10,9 @@ import getCommonExportActions from './commonExporter';
 type GroupByKey = 'account' | 'party' | 'referenceName';
 
 export abstract class LedgerReport extends Report {
-  static title = t`General Ledger`;
+  static get title(): string {
+    return t`General Ledger`;
+  }
   static reportName = 'general-ledger';
 
   _rawData: LedgerEntry[] = [];

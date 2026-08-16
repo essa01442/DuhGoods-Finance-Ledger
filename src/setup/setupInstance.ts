@@ -39,6 +39,7 @@ export default async function setupInstance(
   fyo.store.skipTelemetryLogging = true;
   await initializeDatabase(dbPath, country, fyo);
   await updateSystemSettings(setupWizardOptions, fyo);
+  await fyo.reinitializeMoneyMaker();
   await updateAccountingSettings(setupWizardOptions, fyo);
   await updatePrintSettings(setupWizardOptions, fyo);
 

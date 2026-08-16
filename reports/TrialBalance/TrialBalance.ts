@@ -30,7 +30,9 @@ import { Field } from 'schemas/types';
 import { QueryFilter } from 'utils/db/types';
 
 export class TrialBalance extends AccountReport {
-  static title = t`Trial Balance`;
+  static get title(): string {
+    return t`Trial Balance`;
+  }
   static reportName = 'trial-balance';
 
   fromDate?: string;

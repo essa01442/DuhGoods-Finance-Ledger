@@ -1,0 +1,71 @@
+{
+  "name": "DuhGoodsImportSource",
+  "label": "Import Source",
+  "create": true,
+  "isSingle": false,
+  "isChild": false,
+  "naming": "autoincrement",
+  "fields": [
+    {
+      "fieldname": "sourceName",
+      "label": "Source Name",
+      "fieldtype": "Data",
+      "required": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceType",
+      "label": "Source Type",
+      "fieldtype": "Select",
+      "required": true,
+      "options": "woocommerce\nbank_statement\npsp_export\nmanual",
+      "section": "Default"
+    },
+    {
+      "fieldname": "importedAt",
+      "label": "Imported At",
+      "fieldtype": "Datetime",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceFile",
+      "label": "Source File",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceHash",
+      "label": "Source Hash (SHA-256)",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "recordCount",
+      "label": "Record Count",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "required": true,
+      "options": "pending\nimported\npartial\nfailed",
+      "default": "pending",
+      "section": "Default"
+    }
+  ],
+  "quickEditFields": [
+    "sourceName",
+    "sourceType",
+    "importedAt",
+    "sourceFile",
+    "recordCount",
+    "status"
+  ]
+}

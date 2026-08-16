@@ -11,7 +11,9 @@ import { ReportData, RootTypeRow } from 'reports/types';
 import { getMapFromList } from 'utils';
 
 export class BalanceSheet extends AccountReport {
-  static title = t`Balance Sheet`;
+  static get title(): string {
+    return t`Balance Sheet`;
+  }
   static reportName = 'balance-sheet';
   loading = false;
 

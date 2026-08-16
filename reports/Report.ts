@@ -8,7 +8,9 @@ import { getIsNullOrUndef } from 'utils';
 import { ColumnField, ReportData } from './types';
 
 export abstract class Report extends Observable<RawValue> {
-  static title: string;
+  static get title(): string {
+    return '';
+  }
   static reportName: string;
   static isInventory = false;
 

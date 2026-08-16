@@ -4,10 +4,15 @@ import { ModelNameEnum } from 'models/types';
 import { join } from 'path';
 import { Importer } from 'src/importer';
 import test from 'tape';
-import { closeTestFyo, getTestFyo, setupTestFyo } from './helpers';
+import {
+  closeTestFyo,
+  getIndiaTestSetupWizardOptions,
+  getTestFyo,
+  setupTestFyoWith,
+} from './helpers';
 
 const fyo = getTestFyo();
-setupTestFyo(fyo, __filename);
+setupTestFyoWith(fyo, __filename, getIndiaTestSetupWizardOptions());
 
 test('importer init', (t) => {
   const importer = new Importer(ModelNameEnum.SalesInvoice, fyo);

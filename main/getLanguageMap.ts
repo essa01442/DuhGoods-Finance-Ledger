@@ -187,9 +187,15 @@ async function storeFile(code: string, contents: string) {
 }
 
 async function errorHandledFetch(url: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
   try {
-    return await fetch(url);
+    // node-fetch v2 accepts the native AbortSignal; safe cast — abort() is identical.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+    return await fetch(url, { signal: controller.signal as any });
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }

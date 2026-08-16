@@ -58,6 +58,9 @@ import { ERPNextSyncQueue } from './baseModels/ERPNextSyncQueue/ERPNextSyncQueue
 import { FetchFromERPNextQueue } from './baseModels/FetchFromERPNextQueue/FetchFromERPNextQueue';
 import { IntegrationErrorLog } from './baseModels/IntegrationErrorLog/IntegrationErrorLog';
 import { ItemEnquiry } from './baseModels/ItemEnquiry/ItemEnquiry';
+import { DuhGoodsImportSource } from './duhgoods/DuhGoodsImportSource';
+import { DuhGoodsImportRecord } from './duhgoods/DuhGoodsImportRecord';
+import { DuhGoodsReconciliationMatch } from './duhgoods/DuhGoodsReconciliationMatch';
 
 export const models = {
   Account,
@@ -123,6 +126,10 @@ export const models = {
   FetchFromERPNextQueue,
   // Error Log
   IntegrationErrorLog,
+  // DuhGoods ingestion models
+  DuhGoodsImportSource,
+  DuhGoodsImportRecord,
+  DuhGoodsReconciliationMatch,
 } as ModelMap;
 
 export async function getRegionalModels(

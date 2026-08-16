@@ -15,7 +15,9 @@ import {
 } from 'reports/types';
 
 export class ProfitAndLoss extends AccountReport {
-  static title = t`Profit And Loss`;
+  static get title(): string {
+    return t`Profit And Loss`;
+  }
   static reportName = 'profit-and-loss';
   loading = false;
 

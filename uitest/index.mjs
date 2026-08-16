@@ -53,33 +53,41 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   const window = await electronApp.firstWindow();
-  window.setDefaultTimeout(30_000);
+  // Electron IPC + Arabic language-map loading can take >30 s on first boot
+  // under Xvfb; 120 s covers even the slowest headless environments.
+  window.setDefaultTimeout(120_000);
 
   test('1. Load app & verify RTL default', async (t) => {
     t.equal(await window.title(), 'Frappe Books', 'title matches');
 
-    await new Promise((r) => window.once('load', () => r()));
-    t.ok(true, 'window has loaded');
+    // The page `load` event fires when the HTML finishes loading — BEFORE the
+    // async renderer.ts chain (setLanguageMap + ipc.getEnv) completes and
+    // app.mount('body') runs. Waiting for #app[dir] directly is the reliable
+    // way to know Vue has mounted and set the RTL direction attribute.
+    await window.waitForSelector('#app[dir]', { timeout: 120_000 });
+    t.ok(true, 'Vue mounted and #app[dir] is present');
 
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'clean install initial paint is RTL');
   });
 
   test('2. Navigate to database selector', async (t) => {
+    // After Vue mounts it shows either the database selector (first run) or
+    // the Desk with a sidebar change-db button (existing DB). We already
+    // confirmed Vue mounted in test 1, so elements should appear quickly now.
     const changeDb = window.getByTestId('change-db');
     const createNew = window.getByTestId('create-new-file');
 
-    const changeDbPromise = changeDb
-      .waitFor({ state: 'visible' })
-      .then(() => 'change-db');
-    const createNewPromise = createNew
-      .waitFor({ state: 'visible' })
-      .then(() => 'create-new-file');
+    // Try create-new-file first (fresh install); fall back to clicking change-db
+    const createNewVisible = await createNew
+      .waitFor({ state: 'visible', timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
 
-    const el = await Promise.race([changeDbPromise, createNewPromise]);
-    if (el === 'change-db') {
+    if (!createNewVisible) {
+      await changeDb.waitFor({ state: 'visible' });
       await changeDb.click();
-      await createNewPromise;
+      await createNew.waitFor({ state: 'visible' });
     }
 
     t.ok(await createNew.isVisible(), 'create new is visible');
@@ -176,6 +184,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Chart of Accounts screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Chart of Accounts maintains dir="rtl"');
 
@@ -201,6 +210,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Accounting Entry screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Accounting Entry screen maintains dir="rtl"');
 
@@ -222,6 +232,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Settings screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Settings screen maintains dir="rtl"');
 
@@ -245,71 +256,45 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Report screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Report screen maintains dir="rtl"');
 
     await checkVisibleEnglishGate(window, 'Desk', t);
   });
 
-  test('5. UI Acceptance: Chart of Accounts Screen', async (t) => {
-    const coaLink = window
-      .locator('a[href*="/chart-of-accounts"]')
-      .or(window.locator('text=دليل الحسابات'));
-    if (await coaLink.isVisible()) {
-      await coaLink.click();
-      await window.waitForTimeout(1000);
-    }
+  test('9. UI Acceptance: General Ledger Screen — Arabic title, RTL, no English leak', async (t) => {
+    await window.evaluate(() => {
+      window.location.hash = '#/report/GeneralLedger';
+    });
+    await window.waitForTimeout(2000);
+
+    const url = window.url();
+    t.ok(
+      url.includes('GeneralLedger') || url.includes('general-ledger'),
+      `General Ledger route open (${url})`
+    );
+
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
-    t.equal(appDir, 'rtl', 'Chart of Accounts maintains dir="rtl"');
-    await checkVisibleEnglishGate(window, 'Chart of Accounts', t);
+    t.equal(appDir, 'rtl', 'General Ledger screen maintains dir="rtl"');
+
+    const pageText = await window.locator('body').innerText();
+    t.ok(
+      pageText.includes('دفتر الأستاذ العام'),
+      'Arabic title "دفتر الأستاذ العام" is visible on General Ledger screen'
+    );
+
+    const englishRegex = /\bGeneral Ledger\b/;
+    t.notOk(
+      englishRegex.test(pageText),
+      'English "General Ledger" must NOT be visible on General Ledger screen'
+    );
+
+    await checkVisibleEnglishGate(window, 'General Ledger', t);
   });
 
-  test('6. UI Acceptance: Accounting Entry / Document Screen', async (t) => {
-    const salesInvoiceLink = window
-      .locator('a[href*="/invoice/sales"]')
-      .or(
-        window
-          .locator('text=فاتورة مبيعات')
-          .or(window.locator('text=فواتير المبيعات'))
-      );
-    if (await salesInvoiceLink.isVisible()) {
-      await salesInvoiceLink.click();
-      await window.waitForTimeout(1000);
-    }
-    const appDir = await window.getAttribute('#app', 'dir');
-    t.equal(appDir, 'rtl', 'Accounting Entry screen maintains dir="rtl"');
-    await checkVisibleEnglishGate(window, 'Accounting Entry', t);
-  });
-
-  test('7. UI Acceptance: Settings Screen', async (t) => {
-    const settingsLink = window
-      .locator('a[href*="/settings"]')
-      .or(window.locator('text=الإعدادات'));
-    if (await settingsLink.isVisible()) {
-      await settingsLink.click();
-      await window.waitForTimeout(1000);
-    }
-    const appDir = await window.getAttribute('#app', 'dir');
-    t.equal(appDir, 'rtl', 'Settings screen maintains dir="rtl"');
-    await checkVisibleEnglishGate(window, 'Settings', t);
-  });
-
-  test('8. UI Acceptance: Report Screen', async (t) => {
-    const reportLink = window
-      .locator('a[href*="/report/"]')
-      .or(
-        window.locator('text=التقارير').or(window.locator('text=قائمة الدخل'))
-      );
-    if (await reportLink.isVisible()) {
-      await reportLink.click();
-      await window.waitForTimeout(1000);
-    }
-    const appDir = await window.getAttribute('#app', 'dir');
-    t.equal(appDir, 'rtl', 'Report screen maintains dir="rtl"');
-    await checkVisibleEnglishGate(window, 'Report', t);
-  });
-
-  test('9. Close app', async (t) => {
+  test('10. Close app', async (t) => {
     await electronApp.close();
     t.ok(true, 'app closed without errors');
   });

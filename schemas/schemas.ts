@@ -84,6 +84,9 @@ import IntegrationErrorLog from './app/IntegrationErrorLog.json';
 import ItemGroup from './app/ItemGroup.json';
 import { Schema, SchemaStub } from './types';
 import ItemEnquiry from './app/ItemEnquiry.json';
+import DuhGoodsImportSource from './app/duhgoods/DuhGoodsImportSource.json';
+import DuhGoodsImportRecord from './app/duhgoods/DuhGoodsImportRecord.json';
+import DuhGoodsReconciliationMatch from './app/duhgoods/DuhGoodsReconciliationMatch.json';
 
 export const coreSchemas: Schema[] = [
   PatchRun as Schema,
@@ -196,4 +199,9 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   FetchFromERPNextQueue as Schema,
 
   IntegrationErrorLog as Schema,
+
+  // DuhGoods ingestion schemas
+  DuhGoodsImportSource as Schema,
+  DuhGoodsImportRecord as Schema,
+  DuhGoodsReconciliationMatch as Schema,
 ];
