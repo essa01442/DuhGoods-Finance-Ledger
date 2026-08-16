@@ -2238,3 +2238,157 @@ test('ImportOrchestrator: concurrent evidence-version race — retry succeeds at
   }
   t.end();
 });
+
+test('ImportOrchestrator: concurrent first-insert race with different evidence — both evidences preserved', async (t) => {
+  const raceTempPath = path.join(
+    os.tmpdir(),
+    `dghir-first-race-${Date.now()}.db`
+  );
+  const fyo = getTestFyo();
+  await setupInstance(raceTempPath, getTestSetupWizardOptions(), fyo);
+
+  const injectorDm = new DatabaseManager();
+  await injectorDm.connectToDatabase(raceTempPath);
+  const injKnex = injectorDm.db!.knex!;
+
+  const ns = 'bank:FIRSTRACE:SAR';
+  let raceInjected = false;
+
+  class RaceFirstInsertOrchestrator extends ImportOrchestrator {
+    protected override async _insertRecord(
+      txn: ImportedTransaction,
+      meta: InsertRecordMeta
+    ) {
+      if (
+        !raceInjected &&
+        meta.status === 'pending' &&
+        meta.evidenceVersion === 1
+      ) {
+        raceInjected = true;
+        const now = new Date().toISOString();
+        const winnerEvidenceHash = computeEvidenceHash({
+          identityKey: meta.identityKey,
+          raw: { ref: 'FIRSTRACE-REF-001', amount: 999 },
+        });
+        await injKnex('DuhGoodsImportRecord').insert({
+          name: 'first-race-winner-v1',
+          created: now,
+          modified: now,
+          createdBy: '__SYSTEM__',
+          modifiedBy: '__SYSTEM__',
+          importSource: meta.importSourceId,
+          sourceType: txn.sourceType,
+          sourceNamespace: meta.sourceNamespace,
+          sourceId: 'FIRSTRACE-WINNER',
+          identityKey: meta.identityKey,
+          rowLocator: 0,
+          transactionType: txn.transactionType,
+          transactionDate: now,
+          currency: txn.currency,
+          grossAmount: '999.00',
+          fees: '0.00',
+          taxes: '0.00',
+          netAmount: '999.00',
+          status: 'pending',
+          rawData: JSON.stringify({ ref: 'FIRSTRACE-REF-001', amount: 999 }),
+          evidenceHash: winnerEvidenceHash,
+          evidenceVersion: 1,
+          priorEvidenceHash: '',
+          notes: null,
+        });
+      }
+      return super._insertRecord(txn, meta);
+    }
+  }
+
+  function makeTxnAdapter(txns: ImportedTransaction[]) {
+    return { sourceType: 'bank_statement' as const, parse: () => txns };
+  }
+
+  const txn: ImportedTransaction = {
+    sourceId: 'FIRSTRACE-REF-001',
+    sourceType: 'bank_statement',
+    transactionType: 'bank_credit',
+    transactionDate: new Date('2024-03-01'),
+    currency: 'SAR',
+    grossAmount: '500.00',
+    fees: '0.00',
+    taxes: '0.00',
+    netAmount: '500.00',
+    rawData: { ref: 'FIRSTRACE-REF-001', amount: 500 },
+  };
+
+  const r = await new RaceFirstInsertOrchestrator(
+    fyo,
+    makeTxnAdapter([txn])
+  ).import(Buffer.from(''), {
+    sourceName: 'First Race Import',
+    sourceNamespace: ns,
+    sourceFile: 'firstrace.csv',
+  });
+
+  t.ok(raceInjected, 'first-insert race injection was triggered');
+  t.equal(
+    r.exceptions,
+    1,
+    'result: 1 exception (our evidence appended as version 2)'
+  );
+  t.equal(r.errors.length, 0, 'result: no errors (race resolved)');
+  t.equal(r.imported, 0, 'result: 0 imported (our first-insert was displaced)');
+
+  const identityKey = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: ns,
+    externalSourceId: 'FIRSTRACE-REF-001',
+  });
+  const allVersions = await fyo.db.getAll('DuhGoodsImportRecord', {
+    filters: { identityKey },
+    fields: [
+      'name',
+      'evidenceVersion',
+      'evidenceHash',
+      'status',
+      'priorEvidenceHash',
+    ],
+    orderBy: 'evidenceVersion',
+    order: 'asc',
+  });
+
+  t.equal(
+    allVersions.length,
+    2,
+    'exactly 2 evidence records — neither evidence lost'
+  );
+  t.equal(
+    Number(allVersions[0].evidenceVersion),
+    1,
+    'version 1 exists (winner)'
+  );
+  t.equal(
+    Number(allVersions[1].evidenceVersion),
+    2,
+    'version 2 exists (our evidence as exception)'
+  );
+  t.equal(allVersions[1].status, 'exception', 'version 2 status=exception');
+  t.equal(
+    allVersions[1].priorEvidenceHash,
+    allVersions[0].evidenceHash,
+    'version 2 priorEvidenceHash links to version 1'
+  );
+  t.notEqual(
+    allVersions[0].evidenceHash,
+    allVersions[1].evidenceHash,
+    'both versions have distinct evidenceHash — different evidence preserved'
+  );
+
+  await fyo.close();
+  await injectorDm.db!.close();
+  for (const f of [
+    raceTempPath,
+    `${raceTempPath}-wal`,
+    `${raceTempPath}-shm`,
+  ]) {
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  }
+  t.end();
+});
