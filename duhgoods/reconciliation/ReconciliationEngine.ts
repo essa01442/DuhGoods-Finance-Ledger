@@ -5,11 +5,11 @@ export type ReconciliationReason =
   | 'compatible_transaction_types'
   | 'same_currency'
   | 'exact_amount'
-  | 'amount_mismatch'
   | 'date_within_window'
-  | 'date_outside_window'
   | 'explicit_reference'
   | 'different_currency_requires_fx'
+  | 'date_outside_window'
+  | 'amount_mismatch'
   | 'stale_evidence'
   | 'self_match';
 
@@ -50,39 +50,22 @@ export const RECONCILIATION_WINDOWS_DAYS = {
   chargebackBankDebit: 14,
 } as const;
 
-const RELATIONSHIPS: Record<
-  string,
-  { left: string; right: string; days: number; leftAmount: 'gross' | 'net'; rightAmount: 'gross' | 'net' }
-> = {
-  order_payment: {
-    left: 'order',
-    right: 'payment',
-    days: RECONCILIATION_WINDOWS_DAYS.orderPayment,
-    leftAmount: 'gross',
-    rightAmount: 'gross',
-  },
-  refund_refund: {
-    left: 'refund',
-    right: 'refund',
-    days: RECONCILIATION_WINDOWS_DAYS.refundRefund,
-    leftAmount: 'net',
-    rightAmount: 'net',
-  },
-  settlement_bank_credit: {
-    left: 'settlement',
-    right: 'bank_credit',
-    days: RECONCILIATION_WINDOWS_DAYS.settlementBankCredit,
-    leftAmount: 'net',
-    rightAmount: 'net',
-  },
-  chargeback_bank_debit: {
-    left: 'chargeback',
-    right: 'bank_debit',
-    days: RECONCILIATION_WINDOWS_DAYS.chargebackBankDebit,
-    leftAmount: 'net',
-    rightAmount: 'net',
-  },
+type Relationship = {
+  left: string;
+  right: string;
+  leftSource: string;
+  rightSource: string;
+  days: number;
+  leftAmount: 'gross' | 'net';
+  rightAmount: 'gross' | 'net';
 };
+
+const RELATIONSHIPS: Relationship[] = [
+  { left: 'order', right: 'payment', leftSource: 'woocommerce', rightSource: 'psp_export', days: 3, leftAmount: 'gross', rightAmount: 'gross' },
+  { left: 'refund', right: 'refund', leftSource: 'woocommerce', rightSource: 'psp_export', days: 3, leftAmount: 'net', rightAmount: 'net' },
+  { left: 'settlement', right: 'bank_credit', leftSource: 'psp_export', rightSource: 'bank_statement', days: 7, leftAmount: 'net', rightAmount: 'net' },
+  { left: 'chargeback', right: 'bank_debit', leftSource: 'psp_export', rightSource: 'bank_statement', days: 14, leftAmount: 'net', rightAmount: 'net' },
+];
 
 export function generateReconciliationProposals(
   records: ReconciliationRecord[],
@@ -94,11 +77,12 @@ export function generateReconciliationProposals(
   for (const left of latest) {
     for (const right of latest) {
       if (left.name >= right.name) continue;
-      const relationship = findRelationship(left.transactionType, right.transactionType);
-      if (!relationship) continue;
-      const ordered = relationship.left === left.transactionType ? [left, right] : [right, left];
-      const proposal = scorePair(ordered[0], ordered[1], relationship, pesa);
-      if (proposal) proposals.push(proposal);
+      for (const relationship of RELATIONSHIPS) {
+        const ordered = orderPair(left, right, relationship);
+        if (!ordered) continue;
+        const proposal = scorePair(ordered[0], ordered[1], relationship, pesa);
+        if (proposal) proposals.push(proposal);
+      }
     }
   }
 
@@ -118,44 +102,28 @@ export function latestValidEvidence(records: ReconciliationRecord[]): Reconcilia
   return [...latest.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function findRelationship(leftType?: string, rightType?: string) {
-  return Object.values(RELATIONSHIPS).find(
-    (relationship) => relationship.left === leftType && relationship.right === rightType
-  );
+function orderPair(left: ReconciliationRecord, right: ReconciliationRecord, relationship: Relationship): [ReconciliationRecord, ReconciliationRecord] | null {
+  if (left.transactionType === relationship.left && left.sourceType === relationship.leftSource && right.transactionType === relationship.right && right.sourceType === relationship.rightSource) return [left, right];
+  if (right.transactionType === relationship.left && right.sourceType === relationship.leftSource && left.transactionType === relationship.right && left.sourceType === relationship.rightSource) return [right, left];
+  return null;
 }
 
-function scorePair(
-  left: ReconciliationRecord,
-  right: ReconciliationRecord,
-  relationship: (typeof RELATIONSHIPS)[string],
-  pesa: (value: string | number) => Money
-): ReconciliationProposal | null {
-  if (left.name === right.name) return null;
-  if (!left.currency || !right.currency || left.currency !== right.currency) return null;
+function scorePair(left: ReconciliationRecord, right: ReconciliationRecord, relationship: Relationship, pesa: (value: string | number) => Money): ReconciliationProposal | null {
+  if (left.name === right.name || !left.currency || !right.currency || left.currency !== right.currency) return null;
   if (!left.transactionDate || !right.transactionDate) return null;
 
   const dateDeltaDays = Math.abs(left.transactionDate.getTime() - right.transactionDate.getTime()) / 86400000;
   if (dateDeltaDays > relationship.days) return null;
 
-  const leftAmount = left[`${relationship.leftAmount}Amount`] ?? left.netAmount ?? pesa(0);
-  const rightAmount = right[`${relationship.rightAmount}Amount`] ?? right.netAmount ?? pesa(0);
+  const leftAmount = getAmount(left, relationship.leftAmount, pesa);
+  const rightAmount = getAmount(right, relationship.rightAmount, pesa);
   const amountDelta = leftAmount.sub(rightAmount);
   if (!amountDelta.isZero()) return null;
 
-  const reasonCodes: ReconciliationReason[] = [
-    'compatible_transaction_types',
-    'same_currency',
-    'exact_amount',
-    'date_within_window',
-  ];
-  const explicitReference = hasReliableReference(left, right);
-  if (explicitReference) reasonCodes.push('explicit_reference');
+  const reasonCodes: ReconciliationReason[] = ['compatible_transaction_types', 'same_currency', 'exact_amount', 'date_within_window'];
+  if (hasReliableReference(left, right)) reasonCodes.push('explicit_reference');
 
-  const confidence: ReconciliationConfidence = explicitReference
-    ? 'exact'
-    : dateDeltaDays <= 1
-      ? 'high'
-      : 'medium';
+  const confidence: ReconciliationConfidence = reasonCodes.includes('explicit_reference') ? 'exact' : dateDeltaDays <= 1 ? 'high' : 'medium';
   const [first, second] = [left.name, right.name].sort();
   const edgeKey = `${first}:${second}`;
   return {
@@ -182,6 +150,12 @@ function scorePair(
       reasonCodes,
     }),
   };
+}
+
+function getAmount(record: ReconciliationRecord, kind: 'gross' | 'net', pesa: (value: string | number) => Money): Money {
+  if (kind === 'gross' && record.grossAmount) return record.grossAmount;
+  if (record.netAmount) return record.netAmount;
+  return pesa(0);
 }
 
 function hasReliableReference(left: ReconciliationRecord, right: ReconciliationRecord): boolean {
