@@ -3,11 +3,18 @@ import { BankStatementImporter } from '../duhgoods/importers/BankStatementImport
 import { PSPExportImporter } from '../duhgoods/importers/PSPExportImporter';
 import { WooCommerceImporter } from '../duhgoods/importers/WooCommerceImporter';
 import { ImportValidationError } from '../duhgoods/importers/types';
+import { ImportOrchestrator } from '../duhgoods/importers/ImportOrchestrator';
 import {
   computeEvidenceHash,
   computeFileHash,
   computeIdentityKey,
 } from '../duhgoods/evidence/EvidenceManager';
+import {
+  getTestFyo,
+  getTestDbPath,
+  getTestSetupWizardOptions,
+} from './helpers';
+import setupInstance from 'src/setup/setupInstance';
 
 // ── EvidenceManager ──────────────────────────────────────────────────────────
 
@@ -1634,5 +1641,331 @@ test('PSPExportImporter: scientific notation "2.5e3" rejected by strict decimal 
     /not a valid finite number/,
     'scientific notation "2.5e3" must be rejected in PSP importer'
   );
+  t.end();
+});
+
+// ── Bank: negative debit/credit values ───────────────────────────────────────
+
+test('BankStatementImporter: negative debit magnitude rejected', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          { date: '2024-01-01', debit: '-500', reference: 'NEG-DEB-1' },
+        ])
+      ),
+    /debit must be a non-negative magnitude/,
+    'negative debit "-500" must be rejected — debit is a magnitude, direction comes from the column'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: negative credit magnitude rejected', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          { date: '2024-01-01', credit: '-200', reference: 'NEG-CR-1' },
+        ])
+      ),
+    /credit must be a non-negative magnitude/,
+    'negative credit "-200" must be rejected'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: zero debit + zero credit still rejected', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          { date: '2024-01-01', debit: '0', credit: '0', reference: 'ZERO-1' },
+        ])
+      ),
+    /zero-value row/,
+    'both-zero row still rejected'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: both positive debit and credit still rejected', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          {
+            date: '2024-01-01',
+            debit: '100',
+            credit: '50',
+            reference: 'AMB-1',
+          },
+        ])
+      ),
+    /ambiguous row/,
+    'both-positive debit+credit still rejected as ambiguous'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: positive debit accepted', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const txns = importer.parse(
+    JSON.stringify([
+      { date: '2024-01-01', debit: '300', reference: 'POSDEBIT-1' },
+    ])
+  );
+  t.equal(txns.length, 1, 'one transaction');
+  t.equal(txns[0].transactionType, 'bank_debit', 'type is bank_debit');
+  t.equal(txns[0].grossAmount, '300', 'grossAmount = magnitude');
+  t.end();
+});
+
+// ── ImportOrchestrator: sourceNamespace validation ───────────────────────────
+
+test('ImportOrchestrator: empty sourceNamespace rejected before any DB write', async (t) => {
+  const fyo = getTestFyo();
+  await setupInstance(getTestDbPath(), getTestSetupWizardOptions(), fyo);
+
+  const importer = new BankStatementImporter('SAR');
+  const orchestrator = new ImportOrchestrator(fyo, importer);
+
+  let caughtErr: Error | null = null;
+  try {
+    await orchestrator.import(
+      JSON.stringify([
+        { date: '2024-01-01', credit: '100', reference: 'NS-1' },
+      ]),
+      { sourceName: 'Test', sourceNamespace: '' }
+    );
+  } catch (err) {
+    caughtErr = err instanceof Error ? err : new Error(String(err));
+  }
+
+  t.ok(caughtErr, 'empty sourceNamespace throws');
+  t.ok(
+    /sourceNamespace must not be blank/i.test(caughtErr?.message ?? ''),
+    `error mentions sourceNamespace (got: ${caughtErr?.message ?? '(none)'})`
+  );
+
+  // Verify NO ImportSource record was written to the DB.
+  const sources = await fyo.db.getAll('DuhGoodsImportSource', {
+    fields: ['name'],
+  });
+  t.equal(
+    sources.length,
+    0,
+    'no ImportSource record created on namespace validation failure'
+  );
+
+  await fyo.close();
+  t.end();
+});
+
+test('ImportOrchestrator: whitespace-only sourceNamespace rejected', async (t) => {
+  const fyo = getTestFyo();
+  await setupInstance(getTestDbPath(), getTestSetupWizardOptions(), fyo);
+
+  const importer = new BankStatementImporter('SAR');
+  const orchestrator = new ImportOrchestrator(fyo, importer);
+
+  let caughtErr: Error | null = null;
+  try {
+    await orchestrator.import(
+      JSON.stringify([
+        { date: '2024-01-01', credit: '100', reference: 'NS-2' },
+      ]),
+      { sourceName: 'Test', sourceNamespace: '   ' }
+    );
+  } catch (err) {
+    caughtErr = err instanceof Error ? err : new Error(String(err));
+  }
+
+  t.ok(caughtErr, 'whitespace sourceNamespace throws');
+  t.ok(
+    /sourceNamespace must not be blank/i.test(caughtErr?.message ?? ''),
+    'error mentions sourceNamespace'
+  );
+
+  await fyo.close();
+  t.end();
+});
+
+// ── ImportOrchestrator: batch audit counts ────────────────────────────────────
+
+test('ImportOrchestrator: parse failure sets errorCount=1, status=failed', async (t) => {
+  const fyo = getTestFyo();
+  await setupInstance(getTestDbPath(), getTestSetupWizardOptions(), fyo);
+
+  const importer = new BankStatementImporter('SAR');
+  const orchestrator = new ImportOrchestrator(fyo, importer);
+
+  const result = await orchestrator.import('not-json', {
+    sourceName: 'Parse Fail',
+    sourceNamespace: 'bank:TEST:PARSE',
+  });
+
+  t.equal(result.imported, 0, 'imported = 0 on parse failure');
+  t.equal(result.errors.length, 1, 'one error recorded');
+
+  const sources = await fyo.db.getAll('DuhGoodsImportSource', {
+    filters: { name: result.sourceId },
+    fields: ['status', 'errorCount', 'recordCount'],
+    limit: 1,
+  });
+  t.equal(sources.length, 1, 'ImportSource record created');
+  t.equal(sources[0].status, 'failed', 'status = failed');
+  t.equal(Number(sources[0].errorCount), 1, 'errorCount = 1 on parse failure');
+  t.equal(
+    Number(sources[0].recordCount),
+    0,
+    'recordCount = 0 on parse failure'
+  );
+
+  await fyo.close();
+  t.end();
+});
+
+test('ImportOrchestrator: changed evidence produces exception outcome and exceptionCount', async (t) => {
+  const fyo = getTestFyo();
+  await setupInstance(getTestDbPath(), getTestSetupWizardOptions(), fyo);
+
+  const importer = new BankStatementImporter('SAR');
+  const orchestrator = new ImportOrchestrator(fyo, importer);
+
+  const ns = 'bank:EXCEPTION:TEST';
+
+  // First import.
+  const r1 = await orchestrator.import(
+    JSON.stringify([
+      { date: '2024-03-01', credit: '700', reference: 'EX-REF-001' },
+    ]),
+    { sourceName: 'Exception Test 1', sourceNamespace: ns }
+  );
+  t.equal(r1.imported, 1, 'first import: 1 imported');
+  t.equal(r1.exceptions, 0, 'first import: 0 exceptions');
+
+  // Second import — same reference but different amount (changed evidence).
+  const r2 = await orchestrator.import(
+    JSON.stringify([
+      { date: '2024-03-01', credit: '750', reference: 'EX-REF-001' },
+    ]),
+    { sourceName: 'Exception Test 2', sourceNamespace: ns }
+  );
+  t.equal(r2.imported, 0, 'second import: 0 imported (not new evidence)');
+  t.equal(r2.exceptions, 1, 'second import: 1 exception (changed evidence)');
+  t.equal(r2.errors.length, 0, 'second import: 0 errors');
+
+  // Batch status must not be 'imported' when there are exceptions.
+  const src2 = await fyo.db.getAll('DuhGoodsImportSource', {
+    filters: { name: r2.sourceId },
+    fields: ['status', 'exceptionCount'],
+    limit: 1,
+  });
+  t.notEqual(
+    src2[0].status,
+    'imported',
+    'batch with exception must not report status=imported'
+  );
+  t.equal(Number(src2[0].exceptionCount), 1, 'exceptionCount = 1');
+
+  await fyo.close();
+  t.end();
+});
+
+// ── DuhGoodsImportRecord: complete financial field immutability ───────────────
+
+test('DuhGoodsImportRecord: financial fields are immutable after insert', async (t) => {
+  const fyo = getTestFyo();
+  await setupInstance(getTestDbPath(), getTestSetupWizardOptions(), fyo);
+
+  const sourceDoc = fyo.doc.getNewDoc('DuhGoodsImportSource');
+  sourceDoc.sourceName = 'Immutable Financial Test';
+  sourceDoc.sourceNamespace = 'bank:IMMUTABLE:FIN';
+  sourceDoc.sourceType = 'bank_statement';
+  sourceDoc.importedAt = new Date();
+  sourceDoc.sourceHash = '9'.repeat(64);
+  sourceDoc.recordCount = 1;
+  sourceDoc.importedCount = 1;
+  sourceDoc.skippedCount = 0;
+  sourceDoc.exceptionCount = 0;
+  sourceDoc.errorCount = 0;
+  sourceDoc.status = 'imported';
+  await sourceDoc.sync();
+
+  const ns = 'bank:IMMUTABLE:FIN';
+  const externalId = 'IMM-FIN-001';
+  const identityKey = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: ns,
+    externalSourceId: externalId,
+  });
+  const evidenceHash = computeEvidenceHash({
+    identityKey,
+    raw: { ref: externalId },
+  });
+
+  const recordDoc = fyo.doc.getNewDoc('DuhGoodsImportRecord');
+  recordDoc.importSource = sourceDoc.name;
+  recordDoc.sourceType = 'bank_statement';
+  recordDoc.sourceNamespace = ns;
+  recordDoc.sourceId = externalId;
+  recordDoc.identityKey = identityKey;
+  recordDoc.rowLocator = 0;
+  recordDoc.transactionType = 'bank_credit';
+  recordDoc.transactionDate = new Date('2024-06-01');
+  recordDoc.currency = 'SAR';
+  recordDoc.grossAmount = fyo.pesa('1000.00');
+  recordDoc.fees = fyo.pesa('0');
+  recordDoc.taxes = fyo.pesa('0');
+  recordDoc.netAmount = fyo.pesa('1000.00');
+  recordDoc.status = 'pending';
+  recordDoc.rawData = JSON.stringify({ ref: externalId });
+  recordDoc.evidenceHash = evidenceHash;
+  recordDoc.evidenceVersion = 1;
+  recordDoc.priorEvidenceHash = '';
+  await recordDoc.sync();
+  t.ok(recordDoc.name, 'record inserted');
+
+  // Load same record and attempt to mutate grossAmount.
+  const loaded = await fyo.doc.getDoc(
+    'DuhGoodsImportRecord',
+    recordDoc.name as string
+  );
+  loaded.grossAmount = fyo.pesa('9999.00');
+
+  let immutableErr: Error | null = null;
+  try {
+    await loaded.sync();
+  } catch (err) {
+    immutableErr = err instanceof Error ? err : new Error(String(err));
+  }
+  t.ok(immutableErr, 'mutating grossAmount throws');
+  t.ok(
+    /evidence-immutable/i.test(immutableErr?.message ?? ''),
+    `error mentions evidence-immutable (got: ${
+      immutableErr?.message ?? '(none)'
+    })`
+  );
+
+  // status and notes must remain mutable.
+  // fyo.doc.getDoc returns a cached instance; reset the in-memory mutation so
+  // the immutability check sees the original value, then update only mutable fields.
+  loaded.grossAmount = fyo.pesa('1000.00');
+  const loaded2 = loaded;
+  loaded2.status = 'reconciled';
+  loaded2.notes = 'Verified by auditor';
+  let mutErr: Error | null = null;
+  try {
+    await loaded2.sync();
+  } catch (err) {
+    mutErr = err instanceof Error ? err : new Error(String(err));
+  }
+  t.notOk(mutErr, 'status and notes remain mutable after insert');
+
+  await fyo.close();
   t.end();
 });

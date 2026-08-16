@@ -19,38 +19,23 @@ export interface OrchestratorOptions {
    * Logical account / feed identity that scopes all records from this import.
    * Examples: 'bank:SNB:SAR:IBAN1234', 'psp:stripe:live', 'woo:store1'.
    *
-   * Must be unique per distinct source account so that the same external
-   * transaction reference from two different accounts never collides.
+   * Required, non-empty after whitespace trimming. Validated before any
+   * database record is written so failed-validation attempts leave no trace.
    */
   sourceNamespace: string;
   sourceFile?: string;
 }
 
 /**
- * Identity semantics (post-Round-2 redesign):
+ * Outcome of processing a single imported transaction.
  *
- *   identityKey (WITH external ref):
- *     SHA-256(sourceType\x00sourceNamespace\x00externalSourceId)
- *
- *   identityKey (WITHOUT external ref — reference-less rows):
- *     SHA-256(sourceType\x00sourceNamespace\x00sourceFileHash\x00rowLocator)
- *
- *   evidenceHash:
- *     SHA-256({ identityKey, raw: rawData })  — canonical-JSON of the pair
- *
- * Four collision classes prevented:
- *   A. Same external ref from different accounts → different sourceNamespace
- *   B. Same ref across different source types → different sourceType
- *   C. Same row position in different import files → different sourceFileHash
- *   D. Changed source data for same identity → different evidenceHash → exception record
- *
- * Changed-evidence versioning (D):
- *   When a record with the same identityKey already exists but with a
- *   different evidenceHash (rawData changed), a new record is created with
- *   evidenceVersion = prior.evidenceVersion + 1 and priorEvidenceHash linking
- *   back to the previous version.  Neither record is modified; the audit trail
- *   is append-only.
+ *   'imported'  — first-time evidence stored successfully.
+ *   'skipped'   — identical evidence already exists (idempotent re-import).
+ *   'exception' — same identity, different rawData (changed evidence chain).
+ *   ImportError — parse/validation/DB error; record the failure without aborting the batch.
  */
+type OneOutcome = 'imported' | 'skipped' | 'exception' | ImportError;
+
 export class ImportOrchestrator {
   private fyo: Fyo;
   private adapter: ImportAdapter;
@@ -64,15 +49,18 @@ export class ImportOrchestrator {
     input: string | Buffer,
     opts: OrchestratorOptions
   ): Promise<ImportResult> {
+    // Validate sourceNamespace before creating any DB record.
+    const sourceNamespace = validateSourceNamespace(opts.sourceNamespace);
+
     const rawBytes =
       typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
-
     const sourceHash = computeFileHash(rawBytes);
 
     const importSourceDoc = this.fyo.doc.getNewDoc(
       ModelNameEnum.DuhGoodsImportSource
     );
     importSourceDoc.sourceName = opts.sourceName;
+    importSourceDoc.sourceNamespace = sourceNamespace;
     importSourceDoc.sourceType = this.adapter.sourceType;
     importSourceDoc.importedAt = new Date();
     importSourceDoc.sourceFile = opts.sourceFile ?? '';
@@ -80,6 +68,7 @@ export class ImportOrchestrator {
     importSourceDoc.recordCount = 0;
     importSourceDoc.importedCount = 0;
     importSourceDoc.skippedCount = 0;
+    importSourceDoc.exceptionCount = 0;
     importSourceDoc.errorCount = 0;
     importSourceDoc.status = 'pending';
     await importSourceDoc.sync();
@@ -90,15 +79,18 @@ export class ImportOrchestrator {
       const result = this.adapter.parse(rawBytes);
       transactions = result instanceof Promise ? await result : result;
     } catch (err) {
+      // Parse failure: audit the attempt; errorCount reflects the failed batch.
       importSourceDoc.status = 'failed';
       importSourceDoc.errorSummary =
         err instanceof Error ? err.message : String(err);
       importSourceDoc.recordCount = 0;
+      importSourceDoc.errorCount = 1;
       await importSourceDoc.sync();
       return {
         sourceId: importSourceId,
         imported: 0,
         skipped: 0,
+        exceptions: 0,
         errors: [asImportError(err)],
       };
     }
@@ -109,27 +101,34 @@ export class ImportOrchestrator {
     const errors: ImportError[] = [];
     let imported = 0;
     let skipped = 0;
+    let exceptions = 0;
 
     for (const txn of transactions) {
       const outcome = await this._importOne(
         txn,
         importSourceId,
-        opts.sourceNamespace,
+        sourceNamespace,
         sourceHash
       );
       if (outcome === 'imported') {
         imported++;
       } else if (outcome === 'skipped') {
         skipped++;
+      } else if (outcome === 'exception') {
+        exceptions++;
       } else {
         errors.push(outcome);
       }
     }
 
+    // Batch status semantics:
+    //   'imported' — processed without errors or exceptions (skips are fine)
+    //   'partial'  — has exceptions and/or errors alongside some imported/skipped
+    //   'failed'   — all records errored (zero imported, zero exceptions)
     let finalStatus: string;
-    if (errors.length === 0) {
+    if (errors.length === 0 && exceptions === 0) {
       finalStatus = 'imported';
-    } else if (imported > 0) {
+    } else if (imported > 0 || skipped > 0 || exceptions > 0) {
       finalStatus = 'partial';
     } else {
       finalStatus = 'failed';
@@ -138,10 +137,11 @@ export class ImportOrchestrator {
     importSourceDoc.status = finalStatus;
     importSourceDoc.importedCount = imported;
     importSourceDoc.skippedCount = skipped;
+    importSourceDoc.exceptionCount = exceptions;
     importSourceDoc.errorCount = errors.length;
     await importSourceDoc.sync();
 
-    return { sourceId: importSourceId, imported, skipped, errors };
+    return { sourceId: importSourceId, imported, skipped, exceptions, errors };
   }
 
   private async _importOne(
@@ -149,7 +149,7 @@ export class ImportOrchestrator {
     importSourceId: string,
     sourceNamespace: string,
     sourceFileHash: string
-  ): Promise<'imported' | 'skipped' | ImportError> {
+  ): Promise<OneOutcome> {
     const rowLocator =
       typeof txn.normalizedMeta?.rowLocator === 'number'
         ? txn.normalizedMeta.rowLocator
@@ -188,11 +188,11 @@ export class ImportOrchestrator {
           return 'skipped';
         }
 
-        // Same identity, different rawData — append a versioned exception record
-        // that links back to the prior version.  The prior record is NOT modified.
+        // Same identity, different rawData — append a versioned exception
+        // record linking back to the prior version.  Prior record is untouched.
         const priorVersion =
           typeof prior.evidenceVersion === 'number' ? prior.evidenceVersion : 1;
-        return await this._insertRecord(txn, {
+        const insertResult = await this._insertRecord(txn, {
           importSourceId,
           sourceNamespace,
           identityKey,
@@ -202,6 +202,8 @@ export class ImportOrchestrator {
           priorEvidenceHash: prior.evidenceHash as string,
           status: 'exception',
         });
+        // 'imported' from _insertRecord means the exception record was stored.
+        return insertResult === 'imported' ? 'exception' : insertResult;
       }
 
       return await this._insertRecord(txn, {
@@ -215,7 +217,7 @@ export class ImportOrchestrator {
         status: 'pending',
       });
     } catch (err) {
-      // UNIQUE constraint on evidenceHash — concurrent import of identical data.
+      // Real SQLite UNIQUE constraint on evidenceHash — concurrent import.
       if (isEvidenceHashUniqueError(err)) {
         return 'skipped';
       }
@@ -264,7 +266,7 @@ export class ImportOrchestrator {
       return 'imported';
     } catch (err) {
       if (isEvidenceHashUniqueError(err)) {
-        return 'skipped';
+        return 'skipped' as 'imported'; // concurrent race; caller treats as skipped
       }
       return {
         sourceId: txn.sourceId,
@@ -273,6 +275,25 @@ export class ImportOrchestrator {
       };
     }
   }
+}
+
+function validateSourceNamespace(raw: unknown): string {
+  if (raw === undefined || raw === null) {
+    throw new ImportValidationError(
+      ['sourceNamespace is required'],
+      undefined,
+      {}
+    );
+  }
+  const ns = String(raw).trim();
+  if (ns.length === 0) {
+    throw new ImportValidationError(
+      ['sourceNamespace must not be blank or whitespace-only'],
+      undefined,
+      {}
+    );
+  }
+  return ns;
 }
 
 function isEvidenceHashUniqueError(err: unknown): boolean {

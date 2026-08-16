@@ -36,6 +36,7 @@ test('migration: DuhGoodsImportSource table exists and new count fields accept v
 
   const doc = fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsImportSource);
   doc.sourceName = 'SNB SAR Account';
+  doc.sourceNamespace = 'bank:SNB:SAR:IBAN-TEST-000';
   doc.sourceType = 'bank_statement';
   doc.importedAt = now;
   doc.sourceFile = 'snb-jan-2024.json';
@@ -43,6 +44,7 @@ test('migration: DuhGoodsImportSource table exists and new count fields accept v
   doc.recordCount = 10;
   doc.importedCount = 8;
   doc.skippedCount = 1;
+  doc.exceptionCount = 0;
   doc.errorCount = 1;
   doc.status = 'partial';
   doc.errorSummary = 'Row 5: invalid date';
@@ -54,10 +56,12 @@ test('migration: DuhGoodsImportSource table exists and new count fields accept v
     filters: { name: doc.name as string },
     fields: [
       'sourceName',
+      'sourceNamespace',
       'sourceType',
       'recordCount',
       'importedCount',
       'skippedCount',
+      'exceptionCount',
       'errorCount',
       'status',
     ],
@@ -66,9 +70,15 @@ test('migration: DuhGoodsImportSource table exists and new count fields accept v
 
   t.equal(loaded.length, 1, 'record retrieved from DuhGoodsImportSource');
   t.equal(loaded[0].sourceName, 'SNB SAR Account', 'sourceName preserved');
+  t.equal(
+    loaded[0].sourceNamespace,
+    'bank:SNB:SAR:IBAN-TEST-000',
+    'sourceNamespace persisted on ImportSource'
+  );
   t.equal(Number(loaded[0].recordCount), 10, 'recordCount correct');
   t.equal(Number(loaded[0].importedCount), 8, 'importedCount persisted');
   t.equal(Number(loaded[0].skippedCount), 1, 'skippedCount persisted');
+  t.equal(Number(loaded[0].exceptionCount), 0, 'exceptionCount persisted');
   t.equal(Number(loaded[0].errorCount), 1, 'errorCount persisted');
   t.equal(loaded[0].status, 'partial', 'status correct');
   t.end();
@@ -78,12 +88,14 @@ test('migration: DuhGoodsImportRecord table exists and new identity fields accep
   // First insert a source to satisfy the importSource link.
   const sourceDoc = fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsImportSource);
   sourceDoc.sourceName = 'Migration Test Source';
+  sourceDoc.sourceNamespace = 'bank:SNB:SAR:IBAN-TEST-001';
   sourceDoc.sourceType = 'bank_statement';
   sourceDoc.importedAt = new Date();
   sourceDoc.sourceHash = 'b'.repeat(64);
   sourceDoc.recordCount = 1;
   sourceDoc.importedCount = 1;
   sourceDoc.skippedCount = 0;
+  sourceDoc.exceptionCount = 0;
   sourceDoc.errorCount = 0;
   sourceDoc.status = 'imported';
   await sourceDoc.sync();
@@ -164,12 +176,14 @@ test('migration: evidenceHash UNIQUE constraint prevents duplicate insert', asyn
   // Insert source.
   const sourceDoc = fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsImportSource);
   sourceDoc.sourceName = 'UNIQUE Test Source';
+  sourceDoc.sourceNamespace = 'bank:SNB:SAR:IBAN-UNIQUE';
   sourceDoc.sourceType = 'bank_statement';
   sourceDoc.importedAt = new Date();
   sourceDoc.sourceHash = 'c'.repeat(64);
   sourceDoc.recordCount = 1;
   sourceDoc.importedCount = 1;
   sourceDoc.skippedCount = 0;
+  sourceDoc.exceptionCount = 0;
   sourceDoc.errorCount = 0;
   sourceDoc.status = 'imported';
   await sourceDoc.sync();

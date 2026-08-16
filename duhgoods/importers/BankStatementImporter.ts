@@ -113,6 +113,23 @@ export class BankStatementImporter implements ImportAdapter {
     const creditStr = parseDecimalString(row.credit, 'credit', errors);
 
     if (errors.length === 0) {
+      // Debit and credit columns hold magnitudes — a negative magnitude reverses
+      // financial direction and is always a source-data error.
+      if (debitStr.startsWith('-')) {
+        errors.push(
+          `debit must be a non-negative magnitude: "${debitStr}" — ` +
+            'direction is determined by the column, not the sign'
+        );
+      }
+      if (creditStr.startsWith('-')) {
+        errors.push(
+          `credit must be a non-negative magnitude: "${creditStr}" — ` +
+            'direction is determined by the column, not the sign'
+        );
+      }
+    }
+
+    if (errors.length === 0) {
       // Use pesa for monetary zero-comparison — never JS Number.
       const debitZero = _pesa(debitStr).isZero();
       const creditZero = _pesa(creditStr).isZero();

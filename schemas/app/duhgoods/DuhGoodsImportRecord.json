@@ -60,8 +60,14 @@
       "fieldtype": "Select",
       "required": true,
       "options": [
-        "order", "payment", "refund", "fee",
-        "bank_credit", "bank_debit", "settlement", "chargeback"
+        "order",
+        "payment",
+        "refund",
+        "fee",
+        "bank_credit",
+        "bank_debit",
+        "settlement",
+        "chargeback"
       ],
       "readOnly": true,
       "section": "Default"
