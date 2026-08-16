@@ -3,6 +3,7 @@ import { ModelNameEnum } from 'models/types';
 import {
   computeEvidenceHash,
   computeFileHash,
+  computeIdentityKey,
 } from '../evidence/EvidenceManager';
 import {
   ImportAdapter,
@@ -14,27 +15,41 @@ import {
 
 export interface OrchestratorOptions {
   sourceName: string;
+  /**
+   * Logical account / feed identity that scopes all records from this import.
+   * Examples: 'bank:SNB:SAR:IBAN1234', 'psp:stripe:live', 'woo:store1'.
+   *
+   * Must be unique per distinct source account so that the same external
+   * transaction reference from two different accounts never collides.
+   */
+  sourceNamespace: string;
   sourceFile?: string;
 }
 
 /**
- * Identity semantics:
- *   source namespace : sourceType (woocommerce / bank_statement / psp_export / manual)
- *   external ID      : sourceId (the source system's own transaction identifier)
- *   evidence hash    : SHA-256(sourceType + sourceId + canonical(rawData))
+ * Identity semantics (post-Round-2 redesign):
  *
- * Two records with the same (sourceType, sourceId) but different rawData produce
- * different evidence hashes — the earlier record is preserved and the new one is
- * skipped. Changed source data for the same external ID never silently overwrites
- * prior evidence; it simply becomes a no-op import (skipped with the same hash
- * already in the database) or a new record if the hash differs.
+ *   identityKey (WITH external ref):
+ *     SHA-256(sourceType\x00sourceNamespace\x00externalSourceId)
  *
- * Database-level uniqueness on evidenceHash (UNIQUE constraint on the
- * DuhGoodsImportRecord.evidenceHash column) makes idempotency atomic: concurrent
- * imports of the same record race to insert, and the loser gets a UNIQUE constraint
- * error, which is caught and treated as 'skipped'. A query-before-insert check
- * is insufficient because two imports arriving simultaneously would both pass the
- * read check and then one would fail at insert time.
+ *   identityKey (WITHOUT external ref — reference-less rows):
+ *     SHA-256(sourceType\x00sourceNamespace\x00sourceFileHash\x00rowLocator)
+ *
+ *   evidenceHash:
+ *     SHA-256({ identityKey, raw: rawData })  — canonical-JSON of the pair
+ *
+ * Four collision classes prevented:
+ *   A. Same external ref from different accounts → different sourceNamespace
+ *   B. Same ref across different source types → different sourceType
+ *   C. Same row position in different import files → different sourceFileHash
+ *   D. Changed source data for same identity → different evidenceHash → exception record
+ *
+ * Changed-evidence versioning (D):
+ *   When a record with the same identityKey already exists but with a
+ *   different evidenceHash (rawData changed), a new record is created with
+ *   evidenceVersion = prior.evidenceVersion + 1 and priorEvidenceHash linking
+ *   back to the previous version.  Neither record is modified; the audit trail
+ *   is append-only.
  */
 export class ImportOrchestrator {
   private fyo: Fyo;
@@ -52,11 +67,8 @@ export class ImportOrchestrator {
     const rawBytes =
       typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
 
-    // Compute source-file hash from exact original bytes BEFORE any parsing.
     const sourceHash = computeFileHash(rawBytes);
 
-    // Create ImportSource record BEFORE parsing so that even a parse failure
-    // leaves an auditable trail with source hash, type, file name, and timestamp.
     const importSourceDoc = this.fyo.doc.getNewDoc(
       ModelNameEnum.DuhGoodsImportSource
     );
@@ -66,6 +78,9 @@ export class ImportOrchestrator {
     importSourceDoc.sourceFile = opts.sourceFile ?? '';
     importSourceDoc.sourceHash = sourceHash;
     importSourceDoc.recordCount = 0;
+    importSourceDoc.importedCount = 0;
+    importSourceDoc.skippedCount = 0;
+    importSourceDoc.errorCount = 0;
     importSourceDoc.status = 'pending';
     await importSourceDoc.sync();
     const importSourceId = importSourceDoc.name as string;
@@ -75,7 +90,6 @@ export class ImportOrchestrator {
       const result = this.adapter.parse(rawBytes);
       transactions = result instanceof Promise ? await result : result;
     } catch (err) {
-      // Parse failure: update ImportSource to 'failed' so the attempt is auditable.
       importSourceDoc.status = 'failed';
       importSourceDoc.errorSummary =
         err instanceof Error ? err.message : String(err);
@@ -97,7 +111,12 @@ export class ImportOrchestrator {
     let skipped = 0;
 
     for (const txn of transactions) {
-      const outcome = await this._importOne(txn, importSourceId);
+      const outcome = await this._importOne(
+        txn,
+        importSourceId,
+        opts.sourceNamespace,
+        sourceHash
+      );
       if (outcome === 'imported') {
         imported++;
       } else if (outcome === 'skipped') {
@@ -107,10 +126,6 @@ export class ImportOrchestrator {
       }
     }
 
-    // Batch status:
-    //   'imported' — all records processed without errors
-    //   'partial'  — some imported, some errored
-    //   'failed'   — all errored (or zero imported with errors)
     let finalStatus: string;
     if (errors.length === 0) {
       finalStatus = 'imported';
@@ -121,6 +136,9 @@ export class ImportOrchestrator {
     }
 
     importSourceDoc.status = finalStatus;
+    importSourceDoc.importedCount = imported;
+    importSourceDoc.skippedCount = skipped;
+    importSourceDoc.errorCount = errors.length;
     await importSourceDoc.sync();
 
     return { sourceId: importSourceId, imported, skipped, errors };
@@ -128,19 +146,108 @@ export class ImportOrchestrator {
 
   private async _importOne(
     txn: ImportedTransaction,
-    importSourceId: string
+    importSourceId: string,
+    sourceNamespace: string,
+    sourceFileHash: string
   ): Promise<'imported' | 'skipped' | ImportError> {
-    const evidenceHash = computeEvidenceHash({
+    const rowLocator =
+      typeof txn.normalizedMeta?.rowLocator === 'number'
+        ? txn.normalizedMeta.rowLocator
+        : 0;
+
+    const identityKey = computeIdentityKey({
       sourceType: txn.sourceType,
-      sourceId: txn.sourceId,
+      sourceNamespace,
+      externalSourceId: txn.sourceId,
+      sourceFileHash,
+      rowLocator,
+    });
+
+    const evidenceHash = computeEvidenceHash({
+      identityKey,
       raw: txn.rawData,
     });
 
     try {
+      // Check for an existing record with this identityKey.
+      const existing = await this.fyo.db.getAll(
+        ModelNameEnum.DuhGoodsImportRecord,
+        {
+          filters: { identityKey },
+          fields: ['name', 'evidenceHash', 'evidenceVersion'],
+          limit: 1,
+          orderBy: 'evidenceVersion',
+          order: 'desc',
+        }
+      );
+
+      if (existing.length > 0) {
+        const prior = existing[0];
+        if (prior.evidenceHash === evidenceHash) {
+          // Identical content already stored — idempotent skip.
+          return 'skipped';
+        }
+
+        // Same identity, different rawData — append a versioned exception record
+        // that links back to the prior version.  The prior record is NOT modified.
+        const priorVersion =
+          typeof prior.evidenceVersion === 'number' ? prior.evidenceVersion : 1;
+        return await this._insertRecord(txn, {
+          importSourceId,
+          sourceNamespace,
+          identityKey,
+          evidenceHash,
+          rowLocator,
+          evidenceVersion: priorVersion + 1,
+          priorEvidenceHash: prior.evidenceHash as string,
+          status: 'exception',
+        });
+      }
+
+      return await this._insertRecord(txn, {
+        importSourceId,
+        sourceNamespace,
+        identityKey,
+        evidenceHash,
+        rowLocator,
+        evidenceVersion: 1,
+        priorEvidenceHash: '',
+        status: 'pending',
+      });
+    } catch (err) {
+      // UNIQUE constraint on evidenceHash — concurrent import of identical data.
+      if (isEvidenceHashUniqueError(err)) {
+        return 'skipped';
+      }
+      return {
+        sourceId: txn.sourceId,
+        message: err instanceof Error ? err.message : String(err),
+        raw: txn.rawData,
+      };
+    }
+  }
+
+  private async _insertRecord(
+    txn: ImportedTransaction,
+    meta: {
+      importSourceId: string;
+      sourceNamespace: string;
+      identityKey: string;
+      evidenceHash: string;
+      rowLocator: number;
+      evidenceVersion: number;
+      priorEvidenceHash: string;
+      status: string;
+    }
+  ): Promise<'imported' | ImportError> {
+    try {
       const doc = this.fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsImportRecord);
-      doc.importSource = importSourceId;
+      doc.importSource = meta.importSourceId;
       doc.sourceType = txn.sourceType;
+      doc.sourceNamespace = meta.sourceNamespace;
       doc.sourceId = txn.sourceId;
+      doc.identityKey = meta.identityKey;
+      doc.rowLocator = meta.rowLocator;
       doc.transactionType = txn.transactionType;
       doc.transactionDate = txn.transactionDate;
       doc.currency = txn.currency;
@@ -148,15 +255,15 @@ export class ImportOrchestrator {
       doc.fees = this.fyo.pesa(txn.fees);
       doc.taxes = this.fyo.pesa(txn.taxes);
       doc.netAmount = this.fyo.pesa(txn.netAmount);
-      doc.status = 'pending';
+      doc.status = meta.status;
       doc.rawData = JSON.stringify(txn.rawData);
-      doc.evidenceHash = evidenceHash;
+      doc.evidenceHash = meta.evidenceHash;
+      doc.evidenceVersion = meta.evidenceVersion;
+      doc.priorEvidenceHash = meta.priorEvidenceHash;
       await doc.sync();
       return 'imported';
     } catch (err) {
-      // UNIQUE constraint violation means a duplicate evidence hash already
-      // exists — treat as idempotent skip rather than an error.
-      if (isUniqueConstraintError(err)) {
+      if (isEvidenceHashUniqueError(err)) {
         return 'skipped';
       }
       return {
@@ -168,9 +275,7 @@ export class ImportOrchestrator {
   }
 }
 
-function isUniqueConstraintError(err: unknown): boolean {
-  // Match only the DuhGoodsImportRecord.evidenceHash UNIQUE constraint, not any
-  // unrelated UNIQUE violation on other columns or tables.
+function isEvidenceHashUniqueError(err: unknown): boolean {
   return (
     err instanceof Error &&
     /UNIQUE constraint failed:\s*DuhGoodsImportRecord\.evidenceHash/i.test(

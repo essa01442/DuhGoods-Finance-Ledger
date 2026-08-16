@@ -6,6 +6,7 @@ import { ImportValidationError } from '../duhgoods/importers/types';
 import {
   computeEvidenceHash,
   computeFileHash,
+  computeIdentityKey,
 } from '../duhgoods/evidence/EvidenceManager';
 
 // ── EvidenceManager ──────────────────────────────────────────────────────────
@@ -1446,14 +1447,14 @@ test('BankStatementImporter: reference-less row parsed twice gives same evidence
   const txn1 = importer.parse(JSON.stringify(rows))[0];
   const txn2 = importer.parse(JSON.stringify(rows))[0];
   const {
-    computeEvidenceHash,
+    computeEvidenceHash: computeEvidenceHashRequire,
   } = require('../duhgoods/evidence/EvidenceManager');
-  const h1 = computeEvidenceHash({
+  const h1 = computeEvidenceHashRequire({
     sourceType: txn1.sourceType,
     sourceId: txn1.sourceId,
     raw: txn1.rawData,
   });
-  const h2 = computeEvidenceHash({
+  const h2 = computeEvidenceHashRequire({
     sourceType: txn2.sourceType,
     sourceId: txn2.sourceId,
     raw: txn2.rawData,
@@ -1462,6 +1463,176 @@ test('BankStatementImporter: reference-less row parsed twice gives same evidence
     h1,
     h2,
     'reference-less row produces idempotent evidence hash via rawData'
+  );
+  t.end();
+});
+
+// ── computeIdentityKey: collision-prevention tests ───────────────────────────
+
+test('computeIdentityKey: same ref + same namespace → same key', (t) => {
+  const k1 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: 'TXN-001',
+  });
+  const k2 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: 'TXN-001',
+  });
+  t.equal(k1, k2, 'identical inputs produce identical identity key');
+  t.equal(k1.length, 64, 'SHA-256 hex is 64 chars');
+  t.end();
+});
+
+test('computeIdentityKey: same ref from different accounts (collision class A) → different keys', (t) => {
+  const acctA = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: 'TXN-001',
+  });
+  const acctB = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:RJHI:SAR:IBAN5678',
+    externalSourceId: 'TXN-001',
+  });
+  t.notEqual(
+    acctA,
+    acctB,
+    'same external ref from different accounts → different identity keys (collision A prevented)'
+  );
+  t.end();
+});
+
+test('computeIdentityKey: same ref across different source types (collision class B) → different keys', (t) => {
+  const bank = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: 'TXN-001',
+  });
+  const psp = computeIdentityKey({
+    sourceType: 'psp_export',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: 'TXN-001',
+  });
+  t.notEqual(
+    bank,
+    psp,
+    'same ref + same namespace but different sourceType → different identity keys (collision B prevented)'
+  );
+  t.end();
+});
+
+test('computeIdentityKey: reference-less rows in different files (collision class C) → different keys', (t) => {
+  const fileHash1 = computeFileHash('file-contents-A');
+  const fileHash2 = computeFileHash('file-contents-B');
+  const k1 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: '',
+    sourceFileHash: fileHash1,
+    rowLocator: 0,
+  });
+  const k2 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: '',
+    sourceFileHash: fileHash2,
+    rowLocator: 0,
+  });
+  t.notEqual(
+    k1,
+    k2,
+    'same row position in different import files → different identity keys (collision C prevented)'
+  );
+  t.end();
+});
+
+test('computeIdentityKey: reference-less rows in same file at different positions → different keys', (t) => {
+  const fileHash = computeFileHash('same-file-contents');
+  const k1 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: '',
+    sourceFileHash: fileHash,
+    rowLocator: 0,
+  });
+  const k2 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: '',
+    sourceFileHash: fileHash,
+    rowLocator: 1,
+  });
+  t.notEqual(
+    k1,
+    k2,
+    'same file, different row positions → different identity keys'
+  );
+  t.end();
+});
+
+test('computeIdentityKey: reference-less rows in same file at same position → same key (idempotent)', (t) => {
+  const fileHash = computeFileHash('same-file-contents');
+  const k1 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: '',
+    sourceFileHash: fileHash,
+    rowLocator: 0,
+  });
+  const k2 = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:SNB:SAR:IBAN1234',
+    externalSourceId: '',
+    sourceFileHash: fileHash,
+    rowLocator: 0,
+  });
+  t.equal(
+    k1,
+    k2,
+    'same position in same file → identical identity key (idempotent reimport)'
+  );
+  t.end();
+});
+
+// ── Decimal regex: strict grammar rejects scientific notation ─────────────────
+
+test('BankStatementImporter: scientific notation "1e5" rejected by strict decimal regex', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          { date: '2024-01-01', credit: '1e5', reference: 'SCI-1' },
+        ])
+      ),
+    /not a valid finite number/,
+    'scientific notation "1e5" must be rejected — not a valid decimal'
+  );
+  t.end();
+});
+
+test('PSPExportImporter: scientific notation "2.5e3" rejected by strict decimal regex', (t) => {
+  const importer = new PSPExportImporter();
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          {
+            id: 'SCI-PSP-1',
+            type: 'payment',
+            date: '2024-01-01',
+            currency: 'SAR',
+            gross: '2.5e3',
+            fee: '0',
+            tax: '0',
+            net: '2.5e3',
+          },
+        ])
+      ),
+    /not a valid finite number/,
+    'scientific notation "2.5e3" must be rejected in PSP importer'
   );
   t.end();
 });

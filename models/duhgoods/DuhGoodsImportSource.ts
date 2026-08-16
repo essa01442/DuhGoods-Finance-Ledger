@@ -8,7 +8,11 @@ export class DuhGoodsImportSource extends Doc {
   sourceFile?: string;
   sourceHash?: string;
   recordCount?: number;
+  importedCount?: number;
+  skippedCount?: number;
+  errorCount?: number;
   status?: string;
+  errorSummary?: string;
 
   static override getListViewSettings(): ListViewSettings {
     return {
@@ -17,6 +21,9 @@ export class DuhGoodsImportSource extends Doc {
         'sourceType',
         'importedAt',
         'recordCount',
+        'importedCount',
+        'skippedCount',
+        'errorCount',
         'status',
       ],
     };

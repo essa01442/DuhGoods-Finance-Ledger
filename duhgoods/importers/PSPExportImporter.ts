@@ -129,8 +129,11 @@ export class PSPExportImporter implements ImportAdapter {
   }
 }
 
+/** Strict decimal grammar — rejects scientific notation, hex, Infinity, NaN. */
+const DECIMAL_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+
 /**
- * Validates that `value` is a parseable finite decimal number and returns the
+ * Validates that `value` is a strict finite decimal string and returns the
  * ORIGINAL source string — never a JS Number — to preserve source precision.
  */
 function parseDecimalString(
@@ -140,8 +143,7 @@ function parseDecimalString(
 ): string {
   if (value === undefined || value === null || value === '') return '0';
   const str = String(value).trim();
-  const n = Number(str);
-  if (!isFinite(n)) {
+  if (!DECIMAL_RE.test(str)) {
     errors.push(`${field} is not a valid finite number: ${str}`);
     return '0';
   }

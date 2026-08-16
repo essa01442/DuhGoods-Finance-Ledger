@@ -18,7 +18,7 @@
       "label": "Source Type",
       "fieldtype": "Select",
       "required": true,
-      "options": "woocommerce\nbank_statement\npsp_export\nmanual",
+      "options": ["woocommerce", "bank_statement", "psp_export", "manual"],
       "section": "Default"
     },
     {
@@ -51,11 +51,35 @@
       "section": "Default"
     },
     {
+      "fieldname": "importedCount",
+      "label": "Imported",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
+      "fieldname": "skippedCount",
+      "label": "Skipped",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
+      "fieldname": "errorCount",
+      "label": "Errors",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Select",
       "required": true,
-      "options": "pending\nimported\npartial\nfailed",
+      "options": ["pending", "imported", "partial", "failed"],
       "default": "pending",
       "section": "Default"
     },
@@ -73,6 +97,9 @@
     "importedAt",
     "sourceFile",
     "recordCount",
+    "importedCount",
+    "skippedCount",
+    "errorCount",
     "status"
   ]
 }
