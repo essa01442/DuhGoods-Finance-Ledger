@@ -69,26 +69,7 @@ async function handleDirectoryDoesNotExist(dbPath: string) {
 }
 
 async function showDbErrorDialog(detail: string) {
-  const { showDialog } = await import('src/utils/interactive');
-  return showDialog({
-    type: 'error',
-    title: t`Cannot Open File`,
-    detail,
-    buttons: [
-      {
-        label: t`Select File`,
-        action() {
-          return dbErrorActionSymbols.SelectFile;
-        },
-        isPrimary: true,
-      },
-      {
-        label: t`Cancel`,
-        action() {
-          return dbErrorActionSymbols.CancelSelection;
-        },
-        isEscape: true,
-      },
-    ],
-  });
+  const { showToast } = await import('src/utils/interactive');
+  showToast({ type: 'error', message: detail });
+  return dbErrorActionSymbols.CancelSelection;
 }

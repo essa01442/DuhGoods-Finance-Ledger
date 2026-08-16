@@ -103,6 +103,7 @@
       "fieldname": "evidenceHash",
       "label": "Evidence Hash (SHA-256)",
       "fieldtype": "Data",
+      "unique": true,
       "readOnly": true,
       "section": "Evidence"
     },

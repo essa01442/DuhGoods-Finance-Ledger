@@ -54,7 +54,10 @@ import { setLanguageMap } from './utils/language';
     },
   });
 
-  await fyo.telemetry.logOpened();
+  // Telemetry is fire-and-forget: a slow or unreachable IPC creds call must
+  // not gate app startup. navigator.sendBeacon (called inside logOpened) is
+  // already non-blocking; only the getCreds() prelude was blocking mount.
+  void fyo.telemetry.logOpened().catch(() => undefined);
   app.mount('body');
 })();
 

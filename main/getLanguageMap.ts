@@ -20,6 +20,35 @@ import fetch from 'node-fetch';
 
 const VALENTINES_DAY = 1644796800000;
 
+// Short timeout for the optional update-check call — startup must not hang
+// if the network is slow or the GitHub API is unreachable. A failed update-
+// check is harmless; the cached translation file is used instead.
+const UPDATE_CHECK_TIMEOUT_MS = 5_000;
+
+// Reasonable timeout for required content fetches. These calls are only made
+// when no translation file exists on disk; a generous budget avoids false
+// "missing translation" errors on slow connections.
+const CONTENT_FETCH_TIMEOUT_MS = 30_000;
+
+// Test-only injection point. Never call in production code.
+// Allows tests to supply a mock that returns controllable responses
+// without making real network requests.
+type MockFetchFn = (
+  url: string,
+  timeoutMs: number
+) => Promise<{
+  status: number;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+} | null>;
+let _mockFetch: MockFetchFn | null = null;
+export function _injectFetchForTest(fn: MockFetchFn) {
+  _mockFetch = fn;
+}
+export function _resetFetchAfterTest() {
+  _mockFetch = null;
+}
+
 export async function getLanguageMap(code: string): Promise<LanguageMap> {
   const contents = await getContents(code);
   return getMapFromCsv(contents);
@@ -94,7 +123,7 @@ async function fetchAndStoreFile(code: string, date?: Date) {
 
 async function fetchContentsFromApi(code: string) {
   const url = `https://api.github.com/repos/frappe/books/contents/translations/${code}.csv`;
-  const res = await errorHandledFetch(url);
+  const res = await errorHandledFetch(url, CONTENT_FETCH_TIMEOUT_MS);
   if (res === null || res.status !== 200) {
     return null;
   }
@@ -105,7 +134,7 @@ async function fetchContentsFromApi(code: string) {
 
 async function fetchContentsFromRaw(code: string) {
   const url = `https://raw.githubusercontent.com/frappe/books/master/translations/${code}.csv`;
-  const res = await errorHandledFetch(url);
+  const res = await errorHandledFetch(url, CONTENT_FETCH_TIMEOUT_MS);
   if (res === null || res.status !== 200) {
     return null;
   }
@@ -132,7 +161,9 @@ async function shouldUpdateFile(code: string, contents: string) {
 
 async function getLastUpdated(code: string): Promise<Date> {
   const url = `https://api.github.com/repos/frappe/books/commits?path=translations%2F${code}.csv&page=1&per_page=1`;
-  const res = await errorHandledFetch(url);
+  // Use the short update-check timeout — a slow or unreachable GitHub API
+  // must not block renderer startup; the cached file is a safe fallback.
+  const res = await errorHandledFetch(url, UPDATE_CHECK_TIMEOUT_MS);
   if (res === null || res.status !== 200) {
     return new Date(VALENTINES_DAY);
   }
@@ -148,16 +179,22 @@ async function getLastUpdated(code: string): Promise<Date> {
 }
 
 async function getTranslationFilePath(code: string) {
-  let filePath = path.join(
-    process.resourcesPath,
-    `../translations/${code}.csv`
-  );
+  // process.resourcesPath is only defined in Electron; guard for test/dev environments.
+  let filePath = process.resourcesPath
+    ? path.join(process.resourcesPath, `../translations/${code}.csv`)
+    : '';
 
-  try {
-    await fs.access(filePath, constants.R_OK);
-  } catch {
+  if (filePath) {
+    try {
+      await fs.access(filePath, constants.R_OK);
+    } catch {
+      filePath = '';
+    }
+  }
+
+  if (!filePath) {
     /**
-     * This will be used for in Development mode
+     * This will be used in Development mode / test environments.
      */
     filePath = path.join(__dirname, `../../translations/${code}.csv`);
   }
@@ -186,16 +223,16 @@ async function storeFile(code: string, contents: string) {
   await fs.writeFile(filePath, contents, { encoding: 'utf-8' });
 }
 
-async function errorHandledFetch(url: string) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5_000);
+async function errorHandledFetch(url: string, timeoutMs: number) {
+  if (_mockFetch) {
+    return _mockFetch(url, timeoutMs);
+  }
   try {
-    // node-fetch v2 accepts the native AbortSignal; safe cast — abort() is identical.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-    return await fetch(url, { signal: controller.signal as any });
+    // node-fetch v2 has a built-in `timeout` option that aborts the request
+    // via its own internal timer — more reliable than the native AbortController
+    // in this Electron/Node environment.
+    return await fetch(url, { timeout: timeoutMs });
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }

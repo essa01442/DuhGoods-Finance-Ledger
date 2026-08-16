@@ -1,3 +1,4 @@
+import { getMoneyMaker } from 'pesa';
 import {
   ImportAdapter,
   ImportedTransaction,
@@ -5,6 +6,8 @@ import {
   SourceType,
   TransactionType,
 } from './types';
+
+const _pesa = getMoneyMaker({});
 
 interface PSPRow {
   id?: string | number;
@@ -53,7 +56,15 @@ export class PSPExportImporter implements ImportAdapter {
 
   private _mapRow(row: PSPRow, idx: number): ImportedTransaction {
     const errors: string[] = [];
-    const sourceId = String(row.id ?? `psp-${idx}`);
+
+    // External source ID — must come from the PSP; row index is only an
+    // internal locator for the error report, never a source-system ID.
+    const rawId =
+      row.id !== undefined && row.id !== null ? String(row.id).trim() : '';
+    if (!rawId) {
+      errors.push(`transaction id is missing (row index: ${idx})`);
+    }
+
     const rawType = (row.type ?? '').toLowerCase().trim();
 
     if (!rawType) {
@@ -66,6 +77,13 @@ export class PSPExportImporter implements ImportAdapter {
       );
     }
 
+    // Currency must be present in the source record. There is no legitimate
+    // default — an unknown currency is a data quality failure.
+    const currencyStr = (row.currency ?? '').trim();
+    if (!currencyStr) {
+      errors.push('currency is missing or blank');
+    }
+
     const dateStr = (row.date ?? row.created ?? '').trim();
     if (!dateStr) {
       errors.push('transaction date is missing');
@@ -75,46 +93,57 @@ export class PSPExportImporter implements ImportAdapter {
       errors.push(`transaction date is invalid: "${dateStr}"`);
     }
 
-    const gross = parseFiniteNumber(row.gross, 'gross', errors);
-    const fee = parseFiniteNumber(row.fee, 'fee', errors);
-    const tax = parseFiniteNumber(row.tax, 'tax', errors);
+    // Amounts stored as decimal strings to preserve source precision.
+    // parseDecimalString validates and returns the original source string.
+    const gross = parseDecimalString(row.gross, 'gross', errors);
+    const fee = parseDecimalString(row.fee, 'fee', errors);
+    const tax = parseDecimalString(row.tax, 'tax', errors);
+
+    // Use source-provided net if available; otherwise compute via pesa
+    // arithmetic to avoid floating-point accumulation errors.
     const net =
       row.net !== undefined
-        ? parseFiniteNumber(row.net, 'net', errors)
-        : gross - fee - tax;
+        ? parseDecimalString(row.net, 'net', errors)
+        : _pesa(gross).sub(_pesa(fee)).sub(_pesa(tax)).store;
 
     if (errors.length > 0) {
       throw new ImportValidationError(
         errors,
-        sourceId,
+        rawId || undefined,
         row as Record<string, unknown>
       );
     }
 
     return {
-      sourceId,
+      sourceId: rawId,
       sourceType: 'psp_export',
       transactionType: TYPE_MAP[rawType],
       transactionDate: transactionDate!,
-      currency: (row.currency ?? 'SAR').toUpperCase(),
+      currency: currencyStr.toUpperCase(),
       grossAmount: gross,
       fees: fee,
       taxes: tax,
       netAmount: net,
-      rawData: row,
+      rawData: row as Record<string, unknown>,
     };
   }
 }
 
-function parseFiniteNumber(
+/**
+ * Validates that `value` is a parseable finite decimal number and returns the
+ * ORIGINAL source string — never a JS Number — to preserve source precision.
+ */
+function parseDecimalString(
   value: unknown,
   field: string,
   errors: string[]
-): number {
-  const n = Number(value);
+): string {
+  if (value === undefined || value === null || value === '') return '0';
+  const str = String(value).trim();
+  const n = Number(str);
   if (!isFinite(n)) {
-    errors.push(`${field} is not a valid finite number: ${String(value)}`);
-    return 0;
+    errors.push(`${field} is not a valid finite number: ${str}`);
+    return '0';
   }
-  return n;
+  return str;
 }

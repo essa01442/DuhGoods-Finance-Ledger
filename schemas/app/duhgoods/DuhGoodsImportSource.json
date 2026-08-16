@@ -58,6 +58,13 @@
       "options": "pending\nimported\npartial\nfailed",
       "default": "pending",
       "section": "Default"
+    },
+    {
+      "fieldname": "errorSummary",
+      "label": "Error Summary",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Default"
     }
   ],
   "quickEditFields": [

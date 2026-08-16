@@ -167,15 +167,15 @@ export default defineComponent({
       await setLanguageMap();
       this.activeScreen = Screen.Desk;
       await this.setDeskRoute();
-      await fyo.telemetry.start(true);
+      void fyo.telemetry.start(true).catch(() => undefined);
       this.dbPath = filePath;
       this.companyName = (await fyo.getValue(
         ModelNameEnum.AccountingSettings,
         'companyName'
       )) as string;
-      await this.setSearcher();
+      void this.setSearcher().catch(() => undefined);
       updateConfigFiles(fyo);
-      await ipc.checkForUpdates();
+      void ipc.checkForUpdates().catch(() => undefined);
     },
     newDatabase() {
       this.activeScreen = Screen.SetupWizard;
@@ -183,14 +183,14 @@ export default defineComponent({
     async fileSelected(filePath: string): Promise<void> {
       fyo.config.set('lastSelectedFilePath', filePath);
       if (filePath !== ':memory:' && !(await ipc.checkDbAccess(filePath))) {
-        await showDialog({
-          title: this.t`Cannot open file`,
+        showToast({
           type: 'error',
-          detail: this
+          message: this
             .t`Frappe Books does not have access to the selected file: ${filePath}`,
         });
 
         fyo.config.set('lastSelectedFilePath', null);
+        this.activeScreen = Screen.DatabaseSelector;
         return;
       }
 

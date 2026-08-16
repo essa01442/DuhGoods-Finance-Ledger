@@ -153,4 +153,18 @@ router.afterEach(({ fullPath }) => {
   localStorage.setItem('lastRoute', fullPath);
 });
 
+// Bridge hash-fragment navigation to the web-history router.
+// The Electron UI acceptance tests navigate via window.location.hash = '#/path';
+// with createWebHistory those changes don't trigger a router push.  This
+// listener converts a hashchange into a router.push so that hash-based
+// navigation works without switching the whole app to hash history.
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash;
+    if (hash.startsWith('#/')) {
+      void router.push(hash.slice(1));
+    }
+  });
+}
+
 export default router;

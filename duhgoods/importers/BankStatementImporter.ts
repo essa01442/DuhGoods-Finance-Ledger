@@ -1,9 +1,12 @@
+import { getMoneyMaker } from 'pesa';
 import {
   ImportAdapter,
   ImportedTransaction,
   ImportValidationError,
   SourceType,
 } from './types';
+
+const _pesa = getMoneyMaker({});
 
 interface BankRow {
   date: string;
@@ -38,14 +41,11 @@ export class BankStatementImporter implements ImportAdapter {
   private _mapRow(row: BankRow, idx: number): ImportedTransaction {
     const errors: string[] = [];
 
-    // Row-index as internal sequence only — NOT a source-system identity.
-    // The source reference field is the external ID; fall back clearly.
-    const sourceId = row.reference?.trim()
-      ? row.reference.trim()
-      : `internal-seq-${idx}`;
-    const hasSourceRef = Boolean(row.reference?.trim());
+    // Row-index is an internal locator only — NOT a source-system identity.
+    const refTrimmed = row.reference?.trim() ?? '';
+    const hasSourceRef = refTrimmed.length > 0;
+    const sourceId = hasSourceRef ? refTrimmed : `internal-seq-${idx}`;
 
-    // Date validation — missing or invalid date is a hard rejection.
     const dateStr = (row.date ?? '').trim();
     if (!dateStr) {
       errors.push('transaction date is missing');
@@ -55,30 +55,21 @@ export class BankStatementImporter implements ImportAdapter {
       errors.push(`transaction date is invalid: "${dateStr}"`);
     }
 
-    // Preserve original signs from source — do NOT use Math.abs which hides malformed data.
-    const rawDebit = parseMaybeNumber(row.debit);
-    const rawCredit = parseMaybeNumber(row.credit);
+    // Parse as strings first to validate, then check numeric validity.
+    const debitStr = parseDecimalString(row.debit, 'debit', errors);
+    const creditStr = parseDecimalString(row.credit, 'credit', errors);
 
-    if (rawDebit !== null && !isFinite(rawDebit)) {
-      errors.push(`debit is not a valid finite number: ${String(row.debit)}`);
-    }
-    if (rawCredit !== null && !isFinite(rawCredit)) {
-      errors.push(`credit is not a valid finite number: ${String(row.credit)}`);
-    }
+    const debitNum = Number(debitStr);
+    const creditNum = Number(creditStr);
 
-    const debit = rawDebit ?? 0;
-    const credit = rawCredit ?? 0;
-
-    // Reject ambiguous rows where both debit and credit are non-zero.
-    if (debit !== 0 && credit !== 0) {
-      errors.push(
-        `ambiguous row: both debit (${debit}) and credit (${credit}) are non-zero`
-      );
-    }
-
-    // Reject zero-value rows — they carry no financial meaning.
-    if (debit === 0 && credit === 0) {
-      errors.push('zero-value row: both debit and credit are zero');
+    if (errors.length === 0) {
+      if (debitNum !== 0 && creditNum !== 0) {
+        errors.push(
+          `ambiguous row: both debit (${debitStr}) and credit (${creditStr}) are non-zero`
+        );
+      } else if (debitNum === 0 && creditNum === 0) {
+        errors.push('zero-value row: both debit and credit are zero');
+      }
     }
 
     if (errors.length > 0) {
@@ -89,7 +80,7 @@ export class BankStatementImporter implements ImportAdapter {
       );
     }
 
-    const isCredit = credit !== 0;
+    const isCredit = creditNum !== 0;
 
     return {
       sourceId,
@@ -97,21 +88,34 @@ export class BankStatementImporter implements ImportAdapter {
       transactionType: isCredit ? 'bank_credit' : 'bank_debit',
       transactionDate: transactionDate!,
       currency: this.currency,
-      // Preserve original sign from source — credit is positive inflow,
-      // debit is negative outflow.
-      grossAmount: isCredit ? credit : debit,
-      fees: 0,
-      taxes: 0,
-      netAmount: isCredit ? credit : -debit,
-      rawData: {
-        ...row,
-        _hasSourceRef: hasSourceRef,
-      },
+      // grossAmount holds the magnitude (positive) in both directions.
+      grossAmount: isCredit ? creditStr : debitStr,
+      fees: '0',
+      taxes: '0',
+      // netAmount: credit is positive inflow; debit is negative outflow.
+      netAmount: isCredit ? creditStr : _pesa('0').sub(_pesa(debitStr)).store,
+      rawData: row as Record<string, unknown>,
+      normalizedMeta: { hasSourceRef },
     };
   }
 }
 
-function parseMaybeNumber(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null;
-  return Number(value);
+/**
+ * Validates that `value` is a parseable finite decimal number and returns the
+ * ORIGINAL source string — never a JS Number — to preserve source precision.
+ * Returns '0' on empty/null/undefined (not an error — blank debit/credit is normal).
+ */
+function parseDecimalString(
+  value: unknown,
+  field: string,
+  errors: string[]
+): string {
+  if (value === undefined || value === null || value === '') return '0';
+  const str = String(value).trim();
+  const n = Number(str);
+  if (!isFinite(n)) {
+    errors.push(`${field} is not a valid finite number: ${str}`);
+    return '0';
+  }
+  return str;
 }

@@ -18,10 +18,23 @@ export interface OrchestratorOptions {
 }
 
 /**
- * Maps (sourceType, sourceId) → evidenceHash so that the same external
- * transaction from the same source namespace is never imported twice,
- * even if the raw JSON happens to match a different source's record.
- * Different sources sharing identical JSON are NOT treated as duplicates.
+ * Identity semantics:
+ *   source namespace : sourceType (woocommerce / bank_statement / psp_export / manual)
+ *   external ID      : sourceId (the source system's own transaction identifier)
+ *   evidence hash    : SHA-256(sourceType + sourceId + canonical(rawData))
+ *
+ * Two records with the same (sourceType, sourceId) but different rawData produce
+ * different evidence hashes — the earlier record is preserved and the new one is
+ * skipped. Changed source data for the same external ID never silently overwrites
+ * prior evidence; it simply becomes a no-op import (skipped with the same hash
+ * already in the database) or a new record if the hash differs.
+ *
+ * Database-level uniqueness on evidenceHash (UNIQUE constraint on the
+ * DuhGoodsImportRecord.evidenceHash column) makes idempotency atomic: concurrent
+ * imports of the same record race to insert, and the loser gets a UNIQUE constraint
+ * error, which is caught and treated as 'skipped'. A query-before-insert check
+ * is insufficient because two imports arriving simultaneously would both pass the
+ * read check and then one would fail at insert time.
  */
 export class ImportOrchestrator {
   private fyo: Fyo;
@@ -39,24 +52,11 @@ export class ImportOrchestrator {
     const rawBytes =
       typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
 
-    // Compute the source-file hash from the exact original bytes BEFORE any
-    // parsing. This is the provenance hash for the import file itself.
+    // Compute source-file hash from exact original bytes BEFORE any parsing.
     const sourceHash = computeFileHash(rawBytes);
 
-    let transactions: ImportedTransaction[];
-    try {
-      const result = this.adapter.parse(rawBytes);
-      transactions = result instanceof Promise ? await result : result;
-    } catch (err) {
-      // Top-level parse failure — entire batch rejected before any records are created.
-      return {
-        sourceId: '',
-        imported: 0,
-        skipped: 0,
-        errors: [asImportError(err)],
-      };
-    }
-
+    // Create ImportSource record BEFORE parsing so that even a parse failure
+    // leaves an auditable trail with source hash, type, file name, and timestamp.
     const importSourceDoc = this.fyo.doc.getNewDoc(
       ModelNameEnum.DuhGoodsImportSource
     );
@@ -65,11 +65,32 @@ export class ImportOrchestrator {
     importSourceDoc.importedAt = new Date();
     importSourceDoc.sourceFile = opts.sourceFile ?? '';
     importSourceDoc.sourceHash = sourceHash;
-    importSourceDoc.recordCount = transactions.length;
+    importSourceDoc.recordCount = 0;
     importSourceDoc.status = 'pending';
     await importSourceDoc.sync();
-
     const importSourceId = importSourceDoc.name as string;
+
+    let transactions: ImportedTransaction[];
+    try {
+      const result = this.adapter.parse(rawBytes);
+      transactions = result instanceof Promise ? await result : result;
+    } catch (err) {
+      // Parse failure: update ImportSource to 'failed' so the attempt is auditable.
+      importSourceDoc.status = 'failed';
+      importSourceDoc.errorSummary =
+        err instanceof Error ? err.message : String(err);
+      importSourceDoc.recordCount = 0;
+      await importSourceDoc.sync();
+      return {
+        sourceId: importSourceId,
+        imported: 0,
+        skipped: 0,
+        errors: [asImportError(err)],
+      };
+    }
+
+    importSourceDoc.recordCount = transactions.length;
+    await importSourceDoc.sync();
 
     const errors: ImportError[] = [];
     let imported = 0;
@@ -86,11 +107,10 @@ export class ImportOrchestrator {
       }
     }
 
-    // Derive the batch status:
-    // - 'imported'  : all records processed without errors
-    // - 'partial'   : some imported, some errored
-    // - 'failed'    : all records errored (or zero imported and errors exist)
-    // - 'pending'   : nothing happened (empty batch)
+    // Batch status:
+    //   'imported' — all records processed without errors
+    //   'partial'  — some imported, some errored
+    //   'failed'   — all errored (or zero imported with errors)
     let finalStatus: string;
     if (errors.length === 0) {
       finalStatus = 'imported';
@@ -110,26 +130,11 @@ export class ImportOrchestrator {
     txn: ImportedTransaction,
     importSourceId: string
   ): Promise<'imported' | 'skipped' | ImportError> {
-    // Identity: (sourceType, sourceId, evidenceHash).
-    // We require that the sourceType namespace matches so that two different
-    // source systems that happen to produce identical rawData are NOT collapsed.
     const evidenceHash = computeEvidenceHash({
       sourceType: txn.sourceType,
       sourceId: txn.sourceId,
       raw: txn.rawData,
     });
-
-    const existing = await this.fyo.db.getAll(
-      ModelNameEnum.DuhGoodsImportRecord,
-      {
-        fields: ['name'],
-        filters: { evidenceHash },
-      }
-    );
-
-    if (existing.length > 0) {
-      return 'skipped';
-    }
 
     try {
       const doc = this.fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsImportRecord);
@@ -149,6 +154,11 @@ export class ImportOrchestrator {
       await doc.sync();
       return 'imported';
     } catch (err) {
+      // UNIQUE constraint violation means a duplicate evidence hash already
+      // exists — treat as idempotent skip rather than an error.
+      if (isUniqueConstraintError(err)) {
+        return 'skipped';
+      }
       return {
         sourceId: txn.sourceId,
         message: err instanceof Error ? err.message : String(err),
@@ -156,6 +166,10 @@ export class ImportOrchestrator {
       };
     }
   }
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
 }
 
 function asImportError(err: unknown): ImportError {
