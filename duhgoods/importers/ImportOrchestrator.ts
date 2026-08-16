@@ -169,7 +169,14 @@ export class ImportOrchestrator {
 }
 
 function isUniqueConstraintError(err: unknown): boolean {
-  return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
+  // Match only the DuhGoodsImportRecord.evidenceHash UNIQUE constraint, not any
+  // unrelated UNIQUE violation on other columns or tables.
+  return (
+    err instanceof Error &&
+    /UNIQUE constraint failed:\s*DuhGoodsImportRecord\.evidenceHash/i.test(
+      err.message
+    )
+  );
 }
 
 function asImportError(err: unknown): ImportError {

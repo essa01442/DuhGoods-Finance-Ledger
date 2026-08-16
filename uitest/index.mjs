@@ -175,12 +175,17 @@ async function checkVisibleEnglishGate(window, screenName, t) {
 
   test('5. UI Acceptance: Chart of Accounts Screen Navigation & Identity', async (t) => {
     // Wait for the Desk to be ready (SA setup can take > 3 min on slow hardware)
-    await window.getByTestId('company-name').waitFor({ state: 'visible', timeout: 120_000 });
+    await window
+      .getByTestId('company-name')
+      .waitFor({ state: 'visible', timeout: 120_000 });
 
-    await window.evaluate(() => {
-      window.location.hash = '#/chart-of-accounts';
+    await window.evaluate(async () => {
+      const app = document.querySelector('#app')?.__vue_app__;
+      await app?.config.globalProperties.$router.push('/chart-of-accounts');
     });
-    await window.waitForTimeout(1500);
+    await window
+      .waitForURL('**/chart-of-accounts**', { timeout: 10_000 })
+      .catch(() => {});
 
     const url = window.url();
     t.ok(
@@ -202,10 +207,13 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   test('6. UI Acceptance: Accounting Entry Screen Navigation & Identity', async (t) => {
-    await window.evaluate(() => {
-      window.location.hash = '#/list/SalesInvoice';
+    await window.evaluate(async () => {
+      const app = document.querySelector('#app')?.__vue_app__;
+      await app?.config.globalProperties.$router.push('/list/SalesInvoice');
     });
-    await window.waitForTimeout(1500);
+    await window
+      .waitForURL('**/SalesInvoice**', { timeout: 10_000 })
+      .catch(() => {});
 
     const url = window.url();
     t.ok(
@@ -228,10 +236,13 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   test('7. UI Acceptance: Settings Screen Navigation & Identity', async (t) => {
-    await window.evaluate(() => {
-      window.location.hash = '#/settings';
+    await window.evaluate(async () => {
+      const app = document.querySelector('#app')?.__vue_app__;
+      await app?.config.globalProperties.$router.push('/settings');
     });
-    await window.waitForTimeout(1500);
+    await window
+      .waitForURL('**/settings**', { timeout: 10_000 })
+      .catch(() => {});
 
     const url = window.url();
     t.ok(url.includes('settings'), `Settings route open (${url})`);
@@ -250,10 +261,13 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   test('8. UI Acceptance: Report Screen Navigation & Identity', async (t) => {
-    await window.evaluate(() => {
-      window.location.hash = '#/report/ProfitAndLoss';
+    await window.evaluate(async () => {
+      const app = document.querySelector('#app')?.__vue_app__;
+      await app?.config.globalProperties.$router.push('/report/ProfitAndLoss');
     });
-    await window.waitForTimeout(1500);
+    await window
+      .waitForURL('**/report/ProfitAndLoss**', { timeout: 10_000 })
+      .catch(() => {});
 
     const url = window.url();
     t.ok(url.includes('report'), `Report route open (${url})`);
@@ -274,10 +288,13 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   test('9. UI Acceptance: General Ledger Screen — Arabic title, RTL, no English leak', async (t) => {
-    await window.evaluate(() => {
-      window.location.hash = '#/report/GeneralLedger';
+    await window.evaluate(async () => {
+      const app = document.querySelector('#app')?.__vue_app__;
+      await app?.config.globalProperties.$router.push('/report/GeneralLedger');
     });
-    await window.waitForTimeout(2000);
+    await window
+      .waitForURL('**/GeneralLedger**', { timeout: 10_000 })
+      .catch(() => {});
 
     const url = window.url();
     t.ok(

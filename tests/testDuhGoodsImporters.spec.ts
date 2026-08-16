@@ -843,53 +843,117 @@ test('BankStatementImporter: parses credit and debit rows with decimal-string am
   t.end();
 });
 
-test('BankStatementImporter: uses default SAR currency', (t) => {
-  const importer = new BankStatementImporter();
+// ── Currency validation ───────────────────────────────────────────────────────
+
+test('BankStatementImporter: explicit SAR currency preserved', (t) => {
+  const importer = new BankStatementImporter('SAR');
   const txns = importer.parse(JSON.stringify(bankRowsValid));
-  t.equal(txns[0].currency, 'SAR', 'defaults to SAR');
+  t.equal(txns[0].currency, 'SAR', 'SAR passed explicitly is preserved');
   t.end();
 });
 
-test('BankStatementImporter: row without reference uses internal-seq prefix; flag in normalizedMeta', (t) => {
+test('BankStatementImporter: explicit USD currency preserved', (t) => {
+  const importer = new BankStatementImporter('USD');
+  const txns = importer.parse(JSON.stringify(bankRowsValid));
+  t.equal(txns[0].currency, 'USD', 'USD passed explicitly is preserved');
+  t.end();
+});
+
+test('BankStatementImporter: explicit EUR currency preserved', (t) => {
+  const importer = new BankStatementImporter('EUR');
+  const txns = importer.parse(JSON.stringify(bankRowsValid));
+  t.equal(txns[0].currency, 'EUR', 'EUR passed explicitly is preserved');
+  t.end();
+});
+
+test('BankStatementImporter: missing currency throws at construction', (t) => {
+  t.throws(
+    () => new (BankStatementImporter as any)(),
+    /requires an explicit currency/,
+    'undefined currency throws immediately'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: blank currency throws at construction', (t) => {
+  t.throws(
+    () => new BankStatementImporter(''),
+    /must not be blank/,
+    'blank string currency throws immediately'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: whitespace-only currency throws at construction', (t) => {
+  t.throws(
+    () => new BankStatementImporter('   '),
+    /must not be blank/,
+    'whitespace-only currency throws immediately'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: malformed currency throws at construction', (t) => {
+  t.throws(
+    () => new BankStatementImporter('usd'),
+    /malformed/,
+    'lowercase currency throws — must be 3 uppercase letters'
+  );
+  t.throws(
+    () => new BankStatementImporter('DOLLARS'),
+    /malformed/,
+    'more than 3 letters throws'
+  );
+  t.throws(
+    () => new BankStatementImporter('S1'),
+    /malformed/,
+    'non-letter character throws'
+  );
+  t.end();
+});
+
+// ── Row locator vs external ID ───────────────────────────────────────────────
+
+test('BankStatementImporter: row without reference has empty sourceId, rowLocator in normalizedMeta', (t) => {
   const importer = new BankStatementImporter('SAR');
   const rows = [{ date: '2024-01-01', credit: '100.00', debit: '' }];
   const txns = importer.parse(JSON.stringify(rows));
-  t.ok(
-    txns[0].sourceId.startsWith('internal-seq-'),
-    'generated sourceId has internal-seq prefix'
+  t.equal(
+    txns[0].sourceId,
+    '',
+    'sourceId is empty string — no external ref invented'
   );
-  // _hasSourceRef must NOT appear in rawData (no augmentation).
+  t.equal(txns[0].normalizedMeta?.hasSourceRef, false, 'hasSourceRef false');
+  t.equal(
+    txns[0].normalizedMeta?.rowLocator,
+    0,
+    'rowLocator = row index (internal only)'
+  );
+  // rawData must not be augmented.
   t.equal(
     txns[0].rawData['_hasSourceRef'],
     undefined,
     '_hasSourceRef absent from rawData'
-  );
-  t.equal(
-    txns[0].normalizedMeta?.hasSourceRef,
-    false,
-    'hasSourceRef in normalizedMeta'
   );
   t.end();
 });
 
-test('BankStatementImporter: row with reference; hasSourceRef true in normalizedMeta', (t) => {
+test('BankStatementImporter: row with reference has sourceId = reference; rowLocator preserved', (t) => {
   const importer = new BankStatementImporter('SAR');
   const txns = importer.parse(JSON.stringify(bankRowsValid));
+  t.equal(txns[0].sourceId, 'REF001', 'sourceId = bank reference exactly');
+  t.equal(txns[0].normalizedMeta?.hasSourceRef, true, 'hasSourceRef true');
+  t.equal(txns[0].normalizedMeta?.rowLocator, 0, 'rowLocator = row index');
   t.equal(
     txns[0].rawData['_hasSourceRef'],
     undefined,
     '_hasSourceRef absent from rawData'
-  );
-  t.equal(
-    txns[0].normalizedMeta?.hasSourceRef,
-    true,
-    'hasSourceRef=true in normalizedMeta'
   );
   t.end();
 });
 
 test('BankStatementImporter: rejects non-array input', (t) => {
-  const importer = new BankStatementImporter();
+  const importer = new BankStatementImporter('SAR');
   t.throws(
     () => importer.parse('{}'),
     /must be a JSON array/,
@@ -1187,6 +1251,217 @@ test('rawData must equal the original source object — no synthetic keys', (t) 
     rawKeys,
     sourceKeys,
     'rawData keys are exactly the source keys — no added synthetic keys'
+  );
+  t.end();
+});
+
+// ── Bank: pesa-based zero/sign comparisons (Issue 5) ─────────────────────────
+
+test('BankStatementImporter: pesa zero-comparison — amount 0 is zero', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([{ date: '2024-01-01', debit: 0, credit: 0 }])
+      ),
+    /zero-value row/,
+    'both-zero row throws (pesa zero check, not Number())'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: pesa zero-comparison — 0.000001 is non-zero', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const txns = importer.parse(
+    JSON.stringify([
+      { date: '2024-01-01', credit: '0.000001', reference: 'T1' },
+    ])
+  );
+  t.equal(
+    txns[0].grossAmount,
+    '0.000001',
+    'sub-cent amount preserved as string'
+  );
+  t.equal(txns[0].transactionType, 'bank_credit', 'direction correct via pesa');
+  t.end();
+});
+
+test('BankStatementImporter: pesa zero-comparison — 0.1 credit recognised', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const txns = importer.parse(
+    JSON.stringify([{ date: '2024-01-01', credit: '0.1', reference: 'T2' }])
+  );
+  t.equal(txns[0].grossAmount, '0.1', 'grossAmount is source string');
+  t.equal(txns[0].transactionType, 'bank_credit', 'direction is credit');
+  t.end();
+});
+
+test('BankStatementImporter: pesa zero-comparison — 0.01 debit recognised', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const txns = importer.parse(
+    JSON.stringify([{ date: '2024-01-01', debit: '0.01', reference: 'T3' }])
+  );
+  t.equal(txns[0].grossAmount, '0.01', 'grossAmount is source string');
+  t.equal(txns[0].transactionType, 'bank_debit', 'direction is debit');
+  t.end();
+});
+
+test('BankStatementImporter: large credit 123456789.99 preserved without float loss', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const txns = importer.parse(
+    JSON.stringify([
+      { date: '2024-01-01', credit: '123456789.99', reference: 'BIG-1' },
+    ])
+  );
+  t.equal(
+    txns[0].grossAmount,
+    '123456789.99',
+    'large amount preserved as source string'
+  );
+  t.equal(txns[0].netAmount, '123456789.99', 'net equals gross for credit');
+  t.end();
+});
+
+test('BankStatementImporter: large debit 999999999999.999999 preserved without float loss', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const txns = importer.parse(
+    JSON.stringify([
+      { date: '2024-01-01', debit: '999999999999.999999', reference: 'BIG-2' },
+    ])
+  );
+  t.equal(
+    txns[0].grossAmount,
+    '999999999999.999999',
+    'large debit amount preserved as source string'
+  );
+  t.equal(txns[0].transactionType, 'bank_debit', 'direction is debit');
+  t.end();
+});
+
+test('BankStatementImporter: ambiguous row (both non-zero) throws via pesa comparison', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          {
+            date: '2024-01-01',
+            debit: '100.00',
+            credit: '50.00',
+            reference: 'AMB-1',
+          },
+        ])
+      ),
+    /ambiguous row/,
+    'both-nonzero throws (direction determined via pesa isZero)'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: invalid/non-finite/garbage value throws', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          { date: '2024-01-01', credit: 'garbage', reference: 'BAD-1' },
+        ])
+      ),
+    /not a valid finite number/,
+    'non-numeric credit throws'
+  );
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          { date: '2024-01-01', debit: 'Infinity', reference: 'BAD-2' },
+        ])
+      ),
+    /not a valid finite number/,
+    'Infinity string throws'
+  );
+  t.throws(
+    () =>
+      importer.parse(
+        JSON.stringify([
+          { date: '2024-01-01', credit: 'NaN', reference: 'BAD-3' },
+        ])
+      ),
+    /not a valid finite number/,
+    'NaN string throws'
+  );
+  t.end();
+});
+
+// ── Bank identity: row locator vs external ID ─────────────────────────────────
+
+test('BankStatementImporter: same row index in different files does not collide if rawData differs', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const file1 = [{ date: '2024-01-01', credit: '100', debit: '' }];
+  const file2 = [{ date: '2024-02-01', credit: '200', debit: '' }];
+  const txn1 = importer.parse(JSON.stringify(file1))[0];
+  const txn2 = importer.parse(JSON.stringify(file2))[0];
+  // Same rowLocator (0) but different rawData → different evidence hashes.
+  const {
+    computeEvidenceHash,
+  } = require('../duhgoods/evidence/EvidenceManager');
+  const h1 = computeEvidenceHash({
+    sourceType: txn1.sourceType,
+    sourceId: txn1.sourceId,
+    raw: txn1.rawData,
+  });
+  const h2 = computeEvidenceHash({
+    sourceType: txn2.sourceType,
+    sourceId: txn2.sourceId,
+    raw: txn2.rawData,
+  });
+  t.notEqual(
+    h1,
+    h2,
+    'same row index, different rawData → different evidence hashes'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: same external reference in different source accounts must use different source namespace', (t) => {
+  // The importer itself cannot enforce cross-account isolation — that is the
+  // orchestrator's responsibility via its sourceName/sourceType scoping.
+  // What the importer MUST do is set sourceId = the raw reference exactly.
+  const importer = new BankStatementImporter('SAR');
+  const rows = [{ date: '2024-01-01', credit: '500', reference: 'TXN-SAME' }];
+  const txns = importer.parse(JSON.stringify(rows));
+  t.equal(
+    txns[0].sourceId,
+    'TXN-SAME',
+    'sourceId is the bank reference exactly'
+  );
+  t.end();
+});
+
+// ── Idempotency: reference-less rows use rawData for identity ─────────────────
+
+test('BankStatementImporter: reference-less row parsed twice gives same evidence hash', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const rows = [{ date: '2024-01-01', credit: '75.50' }];
+  const txn1 = importer.parse(JSON.stringify(rows))[0];
+  const txn2 = importer.parse(JSON.stringify(rows))[0];
+  const {
+    computeEvidenceHash,
+  } = require('../duhgoods/evidence/EvidenceManager');
+  const h1 = computeEvidenceHash({
+    sourceType: txn1.sourceType,
+    sourceId: txn1.sourceId,
+    raw: txn1.rawData,
+  });
+  const h2 = computeEvidenceHash({
+    sourceType: txn2.sourceType,
+    sourceId: txn2.sourceId,
+    raw: txn2.rawData,
+  });
+  t.equal(
+    h1,
+    h2,
+    'reference-less row produces idempotent evidence hash via rawData'
   );
   t.end();
 });

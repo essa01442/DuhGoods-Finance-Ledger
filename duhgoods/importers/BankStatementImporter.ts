@@ -8,6 +8,50 @@ import {
 
 const _pesa = getMoneyMaker({});
 
+/**
+ * IDENTITY FORMULA for bank statement transactions:
+ *
+ *   sourceType = 'bank_statement'
+ *   sourceId   = row.reference (source-system external transaction ID)
+ *              — only set when the bank provides a reference
+ *   rowLocator = row index within this import file (internal, for error reporting)
+ *   evidenceHash = SHA-256(sourceType + sourceId + canonical(rawData))
+ *
+ * Rows WITHOUT an external reference (hasSourceRef = false) carry sourceId = ''
+ * and are recorded in normalizedMeta.rowLocator for traceability.  They can still
+ * be imported, but idempotency relies on rawData content rather than an external ID.
+ *
+ * Two rows with the SAME reference from DIFFERENT source namespaces/accounts do not
+ * collide because the orchestrator scopes identity by sourceType + sourceId + rawData.
+ *
+ * CURRENCY must be provided explicitly.  There is no silent SAR fallback; importing
+ * without knowing the currency of the account would manufacture a financial fact.
+ */
+
+/** Validates an ISO 4217-style currency code: 3 uppercase letters. */
+function validateCurrency(currency: unknown): string {
+  if (currency === undefined || currency === null) {
+    throw new Error(
+      'BankStatementImporter requires an explicit currency; no silent SAR default — ' +
+        'pass the account or import configuration currency.'
+    );
+  }
+  const code = String(currency).trim();
+  if (code.length === 0) {
+    throw new Error(
+      'BankStatementImporter currency must not be blank — ' +
+        'pass the account or import configuration currency.'
+    );
+  }
+  if (!/^[A-Z]{3}$/.test(code)) {
+    throw new Error(
+      `BankStatementImporter currency "${code}" is malformed — ` +
+        'expected exactly 3 uppercase letters (ISO 4217 style, e.g. SAR, USD, EUR).'
+    );
+  }
+  return code;
+}
+
 interface BankRow {
   date: string;
   description?: string;
@@ -23,8 +67,13 @@ export class BankStatementImporter implements ImportAdapter {
 
   private readonly currency: string;
 
-  constructor(currency = 'SAR') {
-    this.currency = currency;
+  /**
+   * @param currency — Required.  Must be a 3-letter ISO 4217 code (SAR, USD, EUR…).
+   *   Omitting or blanking currency throws immediately so callers cannot accidentally
+   *   import statements with a manufactured currency denomination.
+   */
+  constructor(currency: string) {
+    this.currency = validateCurrency(currency);
   }
 
   parse(input: string | Buffer): ImportedTransaction[] {
@@ -41,10 +90,14 @@ export class BankStatementImporter implements ImportAdapter {
   private _mapRow(row: BankRow, idx: number): ImportedTransaction {
     const errors: string[] = [];
 
-    // Row-index is an internal locator only — NOT a source-system identity.
+    // A. External source-system transaction ID — only when provided by the bank.
+    // B. Internal row locator (idx) is used ONLY for error messages, never as identity.
     const refTrimmed = row.reference?.trim() ?? '';
     const hasSourceRef = refTrimmed.length > 0;
-    const sourceId = hasSourceRef ? refTrimmed : `internal-seq-${idx}`;
+
+    // sourceId is the bank's external reference, or empty string for reference-less rows.
+    // Row index is NEVER placed in sourceId; it is stored in normalizedMeta for traceability.
+    const sourceId = hasSourceRef ? refTrimmed : '';
 
     const dateStr = (row.date ?? '').trim();
     if (!dateStr) {
@@ -55,19 +108,20 @@ export class BankStatementImporter implements ImportAdapter {
       errors.push(`transaction date is invalid: "${dateStr}"`);
     }
 
-    // Parse as strings first to validate, then check numeric validity.
+    // Parse as original strings; use pesa for ALL zero/sign comparisons.
     const debitStr = parseDecimalString(row.debit, 'debit', errors);
     const creditStr = parseDecimalString(row.credit, 'credit', errors);
 
-    const debitNum = Number(debitStr);
-    const creditNum = Number(creditStr);
-
     if (errors.length === 0) {
-      if (debitNum !== 0 && creditNum !== 0) {
+      // Use pesa for monetary zero-comparison — never JS Number.
+      const debitZero = _pesa(debitStr).isZero();
+      const creditZero = _pesa(creditStr).isZero();
+
+      if (!debitZero && !creditZero) {
         errors.push(
           `ambiguous row: both debit (${debitStr}) and credit (${creditStr}) are non-zero`
         );
-      } else if (debitNum === 0 && creditNum === 0) {
+      } else if (debitZero && creditZero) {
         errors.push('zero-value row: both debit and credit are zero');
       }
     }
@@ -80,7 +134,8 @@ export class BankStatementImporter implements ImportAdapter {
       );
     }
 
-    const isCredit = creditNum !== 0;
+    // Use pesa for direction decision — never JS Number comparison.
+    const isCredit = !_pesa(creditStr).isZero();
 
     return {
       sourceId,
@@ -95,7 +150,12 @@ export class BankStatementImporter implements ImportAdapter {
       // netAmount: credit is positive inflow; debit is negative outflow.
       netAmount: isCredit ? creditStr : _pesa('0').sub(_pesa(debitStr)).store,
       rawData: row as Record<string, unknown>,
-      normalizedMeta: { hasSourceRef },
+      normalizedMeta: {
+        // Whether the bank provided its own external reference.
+        hasSourceRef,
+        // Row index within the import file — internal locator, never used as identity.
+        rowLocator: idx,
+      },
     };
   }
 }
@@ -112,6 +172,7 @@ function parseDecimalString(
 ): string {
   if (value === undefined || value === null || value === '') return '0';
   const str = String(value).trim();
+  // Number() is used ONLY for format validation (finite check), not for monetary arithmetic.
   const n = Number(str);
   if (!isFinite(n)) {
     errors.push(`${field} is not a valid finite number: ${str}`);
