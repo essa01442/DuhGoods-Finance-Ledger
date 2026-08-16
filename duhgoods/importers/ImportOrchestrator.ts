@@ -13,6 +13,17 @@ import {
   ImportedTransaction,
 } from './types';
 
+export interface InsertRecordMeta {
+  importSourceId: string;
+  sourceNamespace: string;
+  identityKey: string;
+  evidenceHash: string;
+  rowLocator: number;
+  evidenceVersion: number;
+  priorEvidenceHash: string;
+  status: string;
+}
+
 export interface OrchestratorOptions {
   sourceName: string;
   /**
@@ -190,23 +201,63 @@ export class ImportOrchestrator {
 
         // Same identity, different rawData — append a versioned exception
         // record linking back to the prior version.  Prior record is untouched.
-        const priorVersion =
+        // Retry up to MAX_VERSION_RETRIES times if a concurrent import claims
+        // the same version slot between our read and our write.
+        const MAX_VERSION_RETRIES = 3;
+        let latestPriorVersion =
           typeof prior.evidenceVersion === 'number' ? prior.evidenceVersion : 1;
-        const insertResult = await this._insertRecord(txn, {
-          importSourceId,
-          sourceNamespace,
-          identityKey,
-          evidenceHash,
-          rowLocator,
-          evidenceVersion: priorVersion + 1,
-          priorEvidenceHash: prior.evidenceHash as string,
-          status: 'exception',
-        });
-        // 'imported' from _insertRecord means the exception record was stored.
-        return insertResult === 'imported' ? 'exception' : insertResult;
+        let latestPriorHash = prior.evidenceHash as string;
+
+        for (let attempt = 0; attempt <= MAX_VERSION_RETRIES; attempt++) {
+          const insertResult = await this._insertRecord(txn, {
+            importSourceId,
+            sourceNamespace,
+            identityKey,
+            evidenceHash,
+            rowLocator,
+            evidenceVersion: latestPriorVersion + 1,
+            priorEvidenceHash: latestPriorHash,
+            status: 'exception',
+          });
+
+          if (insertResult === 'imported') return 'exception';
+          if (insertResult === 'skipped') return 'skipped';
+          if (insertResult !== 'version_collision') return insertResult;
+
+          // Another process claimed that version slot. Re-read the latest.
+          const raceLatest = await this.fyo.db.getAll(
+            ModelNameEnum.DuhGoodsImportRecord,
+            {
+              filters: { identityKey },
+              fields: ['name', 'evidenceHash', 'evidenceVersion'],
+              limit: 1,
+              orderBy: 'evidenceVersion',
+              order: 'desc',
+            }
+          );
+          if (raceLatest.length === 0) break;
+          const newest = raceLatest[0];
+          if (newest.evidenceHash === evidenceHash) {
+            // Concurrent winner stored identical evidence — idempotent skip.
+            return 'skipped';
+          }
+          latestPriorVersion =
+            typeof newest.evidenceVersion === 'number'
+              ? newest.evidenceVersion
+              : latestPriorVersion + 1;
+          latestPriorHash = newest.evidenceHash as string;
+        }
+
+        return {
+          sourceId: txn.sourceId,
+          message: `Evidence version race unresolved after ${
+            MAX_VERSION_RETRIES + 1
+          } attempts for identityKey "${identityKey}"`,
+          raw: txn.rawData,
+        };
       }
 
-      return await this._insertRecord(txn, {
+      const firstInsert = await this._insertRecord(txn, {
         importSourceId,
         sourceNamespace,
         identityKey,
@@ -216,6 +267,10 @@ export class ImportOrchestrator {
         priorEvidenceHash: '',
         status: 'pending',
       });
+      // Concurrent first-insert race: another process already claimed version 1.
+      // Treat as idempotent skip — both processes imported the same transaction.
+      if (firstInsert === 'version_collision') return 'skipped';
+      return firstInsert;
     } catch (err) {
       // Real SQLite UNIQUE constraint on evidenceHash — concurrent import.
       if (isEvidenceHashUniqueError(err)) {
@@ -229,19 +284,10 @@ export class ImportOrchestrator {
     }
   }
 
-  private async _insertRecord(
+  protected async _insertRecord(
     txn: ImportedTransaction,
-    meta: {
-      importSourceId: string;
-      sourceNamespace: string;
-      identityKey: string;
-      evidenceHash: string;
-      rowLocator: number;
-      evidenceVersion: number;
-      priorEvidenceHash: string;
-      status: string;
-    }
-  ): Promise<'imported' | ImportError> {
+    meta: InsertRecordMeta
+  ): Promise<'imported' | 'skipped' | 'version_collision' | ImportError> {
     try {
       const doc = this.fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsImportRecord);
       doc.importSource = meta.importSourceId;
@@ -266,7 +312,10 @@ export class ImportOrchestrator {
       return 'imported';
     } catch (err) {
       if (isEvidenceHashUniqueError(err)) {
-        return 'skipped' as 'imported'; // concurrent race; caller treats as skipped
+        return 'skipped'; // concurrent evidenceHash race; caller treats as skip
+      }
+      if (isIdentityVersionUniqueError(err)) {
+        return 'version_collision'; // concurrent version slot race; caller retries
       }
       return {
         sourceId: txn.sourceId,
@@ -300,6 +349,15 @@ function isEvidenceHashUniqueError(err: unknown): boolean {
   return (
     err instanceof Error &&
     /UNIQUE constraint failed:\s*DuhGoodsImportRecord\.evidenceHash/i.test(
+      err.message
+    )
+  );
+}
+
+function isIdentityVersionUniqueError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    /UNIQUE constraint failed:\s*DuhGoodsImportRecord\.(identityKey|evidenceVersion)/i.test(
       err.message
     )
   );

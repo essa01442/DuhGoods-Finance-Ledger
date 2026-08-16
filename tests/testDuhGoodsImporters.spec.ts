@@ -1,9 +1,18 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import test from 'tape';
 import { BankStatementImporter } from '../duhgoods/importers/BankStatementImporter';
 import { PSPExportImporter } from '../duhgoods/importers/PSPExportImporter';
 import { WooCommerceImporter } from '../duhgoods/importers/WooCommerceImporter';
-import { ImportValidationError } from '../duhgoods/importers/types';
-import { ImportOrchestrator } from '../duhgoods/importers/ImportOrchestrator';
+import {
+  ImportValidationError,
+  ImportedTransaction,
+} from '../duhgoods/importers/types';
+import {
+  ImportOrchestrator,
+  InsertRecordMeta,
+} from '../duhgoods/importers/ImportOrchestrator';
 import {
   computeEvidenceHash,
   computeFileHash,
@@ -15,6 +24,7 @@ import {
   getTestSetupWizardOptions,
 } from './helpers';
 import setupInstance from 'src/setup/setupInstance';
+import { DatabaseManager } from 'backend/database/manager';
 
 // ── EvidenceManager ──────────────────────────────────────────────────────────
 
@@ -1967,5 +1977,264 @@ test('DuhGoodsImportRecord: financial fields are immutable after insert', async 
   t.notOk(mutErr, 'status and notes remain mutable after insert');
 
   await fyo.close();
+  t.end();
+});
+
+// ── DuhGoodsImportSource: provenance immutability ────────────────────────────
+
+test('DuhGoodsImportSource: provenance fields are immutable after insert', async (t) => {
+  const fyo = getTestFyo();
+  await setupInstance(getTestDbPath(), getTestSetupWizardOptions(), fyo);
+
+  const now = new Date('2024-06-01T10:00:00Z');
+
+  async function makeSource() {
+    const doc = fyo.doc.getNewDoc('DuhGoodsImportSource');
+    doc.sourceName = 'Provenance Test Source';
+    doc.sourceNamespace = 'bank:PROV:SAR:TEST';
+    doc.sourceType = 'bank_statement';
+    doc.importedAt = now;
+    doc.sourceFile = 'test.csv';
+    doc.sourceHash = 'a'.repeat(64);
+    doc.recordCount = 0;
+    doc.importedCount = 0;
+    doc.skippedCount = 0;
+    doc.exceptionCount = 0;
+    doc.errorCount = 0;
+    doc.status = 'pending';
+    await doc.sync();
+    return doc;
+  }
+
+  const IMMUTABLE_CASES: Array<{
+    field: string;
+    mutate: (d: ReturnType<typeof fyo.doc.getNewDoc>) => void;
+  }> = [
+    {
+      field: 'sourceName',
+      mutate: (d) => {
+        d.sourceName = 'Changed Name';
+      },
+    },
+    {
+      field: 'sourceNamespace',
+      mutate: (d) => {
+        d.sourceNamespace = 'bank:CHANGED';
+      },
+    },
+    {
+      field: 'sourceType',
+      mutate: (d) => {
+        d.sourceType = 'psp_export';
+      },
+    },
+    {
+      field: 'importedAt',
+      mutate: (d) => {
+        d.importedAt = new Date('2099-01-01');
+      },
+    },
+    {
+      field: 'sourceFile',
+      mutate: (d) => {
+        d.sourceFile = 'changed.csv';
+      },
+    },
+    {
+      field: 'sourceHash',
+      mutate: (d) => {
+        d.sourceHash = 'b'.repeat(64);
+      },
+    },
+  ];
+
+  for (const { field, mutate } of IMMUTABLE_CASES) {
+    const src = await makeSource();
+    const loaded = await fyo.doc.getDoc(
+      'DuhGoodsImportSource',
+      src.name as string
+    );
+    mutate(loaded);
+    let err: Error | null = null;
+    try {
+      await loaded.sync();
+    } catch (e) {
+      err = e instanceof Error ? e : new Error(String(e));
+    }
+    t.ok(err, `mutating "${field}" throws`);
+    t.ok(
+      /provenance-immutable/i.test(err?.message ?? ''),
+      `"${field}" error mentions provenance-immutable (got: ${
+        err?.message ?? '(none)'
+      })`
+    );
+  }
+
+  // Mutable fields must still accept updates.
+  const mutableSrc = await makeSource();
+  const mutableLoaded = await fyo.doc.getDoc(
+    'DuhGoodsImportSource',
+    mutableSrc.name as string
+  );
+  mutableLoaded.status = 'imported';
+  mutableLoaded.recordCount = 5;
+  mutableLoaded.importedCount = 4;
+  mutableLoaded.skippedCount = 1;
+  mutableLoaded.exceptionCount = 0;
+  mutableLoaded.errorCount = 0;
+  mutableLoaded.errorSummary = 'none';
+  let mutableErr: Error | null = null;
+  try {
+    await mutableLoaded.sync();
+  } catch (e) {
+    mutableErr = e instanceof Error ? e : new Error(String(e));
+  }
+  t.notOk(mutableErr, 'mutable audit-count and status fields can be updated');
+
+  await fyo.close();
+  t.end();
+});
+
+// ── ImportOrchestrator: concurrent evidence-version race retry ────────────────
+
+test('ImportOrchestrator: concurrent evidence-version race — retry succeeds at version+1', async (t) => {
+  // File-backed DB so a second DatabaseManager connection can inject the racing
+  // record between the orchestrator's read and write in the exception path.
+  const raceTempPath = path.join(os.tmpdir(), `dghir-race-${Date.now()}.db`);
+
+  const fyo = getTestFyo();
+  await setupInstance(raceTempPath, getTestSetupWizardOptions(), fyo);
+
+  const injectorDm = new DatabaseManager();
+  await injectorDm.connectToDatabase(raceTempPath);
+  const injKnex = injectorDm.db!.knex!;
+
+  const ns = 'bank:RACE:SAR';
+  let raceInjected = false;
+
+  class RaceOrchestrator extends ImportOrchestrator {
+    protected override async _insertRecord(
+      txn: ImportedTransaction,
+      meta: InsertRecordMeta
+    ) {
+      if (
+        !raceInjected &&
+        meta.status === 'exception' &&
+        meta.evidenceVersion === 2
+      ) {
+        raceInjected = true;
+        const now = new Date().toISOString();
+        await injKnex('DuhGoodsImportRecord').insert({
+          name: 'race-winner-v2',
+          created: now,
+          modified: now,
+          createdBy: '__SYSTEM__',
+          modifiedBy: '__SYSTEM__',
+          importSource: meta.importSourceId,
+          sourceType: txn.sourceType,
+          sourceNamespace: meta.sourceNamespace,
+          sourceId: 'RACE-WINNER',
+          identityKey: meta.identityKey,
+          rowLocator: 0,
+          transactionType: txn.transactionType,
+          transactionDate: now,
+          currency: txn.currency,
+          grossAmount: txn.grossAmount,
+          fees: txn.fees,
+          taxes: txn.taxes,
+          netAmount: txn.netAmount,
+          status: 'exception',
+          rawData: '{"race":"winner"}',
+          evidenceHash: 'a'.repeat(64),
+          evidenceVersion: 2,
+          priorEvidenceHash: meta.priorEvidenceHash,
+          notes: null,
+        });
+      }
+      return super._insertRecord(txn, meta);
+    }
+  }
+
+  function makeTxnAdapter(txns: ImportedTransaction[]) {
+    return {
+      sourceType: 'bank_statement' as const,
+      parse: () => txns,
+    };
+  }
+
+  const txn1: ImportedTransaction = {
+    sourceId: 'RACE-REF-001',
+    sourceType: 'bank_statement',
+    transactionType: 'bank_credit',
+    transactionDate: new Date('2024-01-15'),
+    currency: 'SAR',
+    grossAmount: '100.00',
+    fees: '0.00',
+    taxes: '0.00',
+    netAmount: '100.00',
+    rawData: { ref: 'RACE-REF-001', amount: 100 },
+  };
+
+  const r1 = await new ImportOrchestrator(fyo, makeTxnAdapter([txn1])).import(
+    Buffer.from(''),
+    {
+      sourceName: 'Race Import 1',
+      sourceNamespace: ns,
+      sourceFile: 'race1.csv',
+    }
+  );
+  t.equal(r1.imported, 1, 'first import: 1 imported (version 1)');
+  t.equal(r1.errors.length, 0, 'first import: no errors');
+
+  const txn2: ImportedTransaction = {
+    ...txn1,
+    rawData: { ref: 'RACE-REF-001', amount: 150 },
+  };
+  const r2 = await new RaceOrchestrator(fyo, makeTxnAdapter([txn2])).import(
+    Buffer.from(''),
+    {
+      sourceName: 'Race Import 2',
+      sourceNamespace: ns,
+      sourceFile: 'race2.csv',
+    }
+  );
+
+  t.ok(raceInjected, 'race injection was triggered');
+  t.equal(r2.exceptions, 1, 'second import: 1 exception (retry at version 3)');
+  t.equal(r2.errors.length, 0, 'second import: no errors after retry');
+
+  const identityKey = computeIdentityKey({
+    sourceType: 'bank_statement',
+    sourceNamespace: ns,
+    externalSourceId: 'RACE-REF-001',
+  });
+  const allVersions = await fyo.db.getAll('DuhGoodsImportRecord', {
+    filters: { identityKey },
+    fields: ['name', 'evidenceVersion', 'evidenceHash', 'status'],
+    orderBy: 'evidenceVersion',
+    order: 'asc',
+  });
+
+  t.equal(
+    allVersions.length,
+    3,
+    'three versions in DB (v1, v2 race-winner, v3 retry)'
+  );
+  t.equal(
+    Number(allVersions[2].evidenceVersion),
+    3,
+    'version 3 created by retry'
+  );
+  t.equal(allVersions[2].status, 'exception', 'version 3 status=exception');
+
+  await fyo.close();
+  await injectorDm.db!.close();
+  for (const f of [
+    raceTempPath,
+    `${raceTempPath}-wal`,
+    `${raceTempPath}-shm`,
+  ]) {
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  }
   t.end();
 });
