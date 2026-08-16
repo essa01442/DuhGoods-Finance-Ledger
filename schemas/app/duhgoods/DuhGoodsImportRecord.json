@@ -1,0 +1,127 @@
+{
+  "name": "DuhGoodsImportRecord",
+  "label": "Import Record",
+  "create": false,
+  "isSingle": false,
+  "isChild": false,
+  "naming": "autoincrement",
+  "fields": [
+    {
+      "fieldname": "importSource",
+      "label": "Import Source",
+      "fieldtype": "Link",
+      "target": "DuhGoodsImportSource",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceType",
+      "label": "Source Type",
+      "fieldtype": "Select",
+      "required": true,
+      "options": "woocommerce\nbank_statement\npsp_export\nmanual",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceId",
+      "label": "Source ID",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "transactionType",
+      "label": "Transaction Type",
+      "fieldtype": "Select",
+      "required": true,
+      "options": "order\npayment\nrefund\nfee\nbank_credit\nbank_debit\nsettlement\nchargeback",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "transactionDate",
+      "label": "Transaction Date",
+      "fieldtype": "Datetime",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "currency",
+      "label": "Currency",
+      "fieldtype": "Link",
+      "target": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "grossAmount",
+      "label": "Gross Amount",
+      "fieldtype": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "fees",
+      "label": "Fees",
+      "fieldtype": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "taxes",
+      "label": "Taxes",
+      "fieldtype": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "netAmount",
+      "label": "Net Amount",
+      "fieldtype": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "required": true,
+      "options": "pending\nreconciled\nunmatched\nexception",
+      "default": "pending",
+      "section": "Reconciliation"
+    },
+    {
+      "fieldname": "rawData",
+      "label": "Raw Data (JSON)",
+      "fieldtype": "Long Text",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "evidenceHash",
+      "label": "Evidence Hash (SHA-256)",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "notes",
+      "label": "Notes",
+      "fieldtype": "Text",
+      "section": "Evidence"
+    }
+  ],
+  "quickEditFields": [
+    "importSource",
+    "sourceType",
+    "sourceId",
+    "transactionType",
+    "transactionDate",
+    "currency",
+    "grossAmount",
+    "netAmount",
+    "status"
+  ]
+}

@@ -81,6 +81,11 @@ export enum ModelNameEnum {
   ERPNextSyncSettings = 'ERPNextSyncSettings',
   ERPNextSyncQueue = 'ERPNextSyncQueue',
   FetchFromERPNextQueue = 'FetchFromERPNextQueue',
+
+  // DuhGoods ingestion
+  DuhGoodsImportSource = 'DuhGoodsImportSource',
+  DuhGoodsImportRecord = 'DuhGoodsImportRecord',
+  DuhGoodsReconciliationMatch = 'DuhGoodsReconciliationMatch',
 }
 
 export type ModelName = keyof typeof ModelNameEnum;

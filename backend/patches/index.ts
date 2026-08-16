@@ -8,6 +8,7 @@ import setPaymentReferenceType from './setPaymentReferenceType';
 import fixLedgerDateTime from './v0_21_0/fixLedgerDateTime';
 import fixItemHSNField from './fixItemHSNField';
 import createPaymentMethods from './createPaymentMethods';
+import createDuhGoodsTables from './createDuhGoodsTables';
 
 export default [
   { name: 'testPatch', version: '0.5.0-beta.0', patch: testPatch },
@@ -47,5 +48,10 @@ export default [
     name: 'createPaymentMethods',
     version: '0.25.1',
     patch: createPaymentMethods,
+  },
+  {
+    name: 'createDuhGoodsTables',
+    version: '0.38.0',
+    patch: createDuhGoodsTables,
   },
 ] as Patch[];
