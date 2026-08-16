@@ -17,6 +17,12 @@ const FORBIDDEN_ENGLISH_LABELS = [
   'Cancel',
   'Reports',
   'Accounting',
+  'Sales Invoice',
+  'Sales Invoices',
+  'Purchase Invoice',
+  'Purchase Invoices',
+  'General Ledger',
+  'Profit and Loss',
 ];
 
 async function checkVisibleEnglishGate(window, screenName, t) {
@@ -140,6 +146,107 @@ async function checkVisibleEnglishGate(window, screenName, t) {
 
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'post-onboarding desk environment remains RTL');
+
+    const deskHeading = await window.locator('body').innerText();
+    t.ok(
+      deskHeading.includes('شركة ده بضائع') ||
+        deskHeading.includes('الرئيسية') ||
+        deskHeading.includes('المحاسبة'),
+      'Desk screen identity confirmed'
+    );
+
+    await checkVisibleEnglishGate(window, 'Desk', t);
+  });
+
+  test('5. UI Acceptance: Chart of Accounts Screen Navigation & Identity', async (t) => {
+    await window.evaluate(() => {
+      window.location.hash = '#/chart-of-accounts';
+    });
+    await window.waitForTimeout(1500);
+
+    const url = window.url();
+    t.ok(
+      url.includes('chart-of-accounts'),
+      `Chart of Accounts route open (${url})`
+    );
+
+    const pageText = await window.locator('body').innerText();
+    t.ok(
+      pageText.includes('دليل الحسابات') || pageText.includes('الأصول'),
+      'Chart of Accounts screen identity confirmed'
+    );
+
+    const appDir = await window.getAttribute('#app', 'dir');
+    t.equal(appDir, 'rtl', 'Chart of Accounts maintains dir="rtl"');
+
+    await checkVisibleEnglishGate(window, 'Chart of Accounts', t);
+  });
+
+  test('6. UI Acceptance: Accounting Entry Screen Navigation & Identity', async (t) => {
+    await window.evaluate(() => {
+      window.location.hash = '#/list/SalesInvoice';
+    });
+    await window.waitForTimeout(1500);
+
+    const url = window.url();
+    t.ok(
+      url.includes('SalesInvoice'),
+      `Sales Invoice document route open (${url})`
+    );
+
+    const pageText = await window.locator('body').innerText();
+    t.ok(
+      pageText.includes('فواتير المبيعات') ||
+        pageText.includes('فاتورة مبيعات'),
+      'Accounting Entry screen identity confirmed'
+    );
+
+    const appDir = await window.getAttribute('#app', 'dir');
+    t.equal(appDir, 'rtl', 'Accounting Entry screen maintains dir="rtl"');
+
+    await checkVisibleEnglishGate(window, 'Accounting Entry', t);
+  });
+
+  test('7. UI Acceptance: Settings Screen Navigation & Identity', async (t) => {
+    await window.evaluate(() => {
+      window.location.hash = '#/settings';
+    });
+    await window.waitForTimeout(1500);
+
+    const url = window.url();
+    t.ok(url.includes('settings'), `Settings route open (${url})`);
+
+    const pageText = await window.locator('body').innerText();
+    t.ok(
+      pageText.includes('الإعدادات') || pageText.includes('إعدادات'),
+      'Settings screen identity confirmed'
+    );
+
+    const appDir = await window.getAttribute('#app', 'dir');
+    t.equal(appDir, 'rtl', 'Settings screen maintains dir="rtl"');
+
+    await checkVisibleEnglishGate(window, 'Settings', t);
+  });
+
+  test('8. UI Acceptance: Report Screen Navigation & Identity', async (t) => {
+    await window.evaluate(() => {
+      window.location.hash = '#/report/ProfitAndLoss';
+    });
+    await window.waitForTimeout(1500);
+
+    const url = window.url();
+    t.ok(url.includes('report'), `Report route open (${url})`);
+
+    const pageText = await window.locator('body').innerText();
+    t.ok(
+      pageText.includes('قائمة الدخل') ||
+        pageText.includes('دفتر الأستاذ العام') ||
+        pageText.includes('التقارير'),
+      'Report screen identity confirmed'
+    );
+
+    const appDir = await window.getAttribute('#app', 'dir');
+    t.equal(appDir, 'rtl', 'Report screen maintains dir="rtl"');
 
     await checkVisibleEnglishGate(window, 'Desk', t);
   });
