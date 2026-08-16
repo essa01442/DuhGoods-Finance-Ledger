@@ -53,6 +53,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   const window = await electronApp.firstWindow();
+
   // Electron IPC + Arabic language-map loading can take >30 s on first boot
   // under Xvfb; 120 s covers even the slowest headless environments.
   window.setDefaultTimeout(120_000);
