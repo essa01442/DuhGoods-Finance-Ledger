@@ -53,33 +53,41 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   const window = await electronApp.firstWindow();
-  window.setDefaultTimeout(30_000);
+  // Electron IPC + Arabic language-map loading can take >30 s on first boot
+  // under Xvfb; 120 s covers even the slowest headless environments.
+  window.setDefaultTimeout(120_000);
 
   test('1. Load app & verify RTL default', async (t) => {
     t.equal(await window.title(), 'Frappe Books', 'title matches');
 
-    await new Promise((r) => window.once('load', () => r()));
-    t.ok(true, 'window has loaded');
+    // The page `load` event fires when the HTML finishes loading — BEFORE the
+    // async renderer.ts chain (setLanguageMap + ipc.getEnv) completes and
+    // app.mount('body') runs. Waiting for #app[dir] directly is the reliable
+    // way to know Vue has mounted and set the RTL direction attribute.
+    await window.waitForSelector('#app[dir]', { timeout: 120_000 });
+    t.ok(true, 'Vue mounted and #app[dir] is present');
 
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'clean install initial paint is RTL');
   });
 
   test('2. Navigate to database selector', async (t) => {
+    // After Vue mounts it shows either the database selector (first run) or
+    // the Desk with a sidebar change-db button (existing DB). We already
+    // confirmed Vue mounted in test 1, so elements should appear quickly now.
     const changeDb = window.getByTestId('change-db');
     const createNew = window.getByTestId('create-new-file');
 
-    const changeDbPromise = changeDb
-      .waitFor({ state: 'visible' })
-      .then(() => 'change-db');
-    const createNewPromise = createNew
-      .waitFor({ state: 'visible' })
-      .then(() => 'create-new-file');
+    // Try create-new-file first (fresh install); fall back to clicking change-db
+    const createNewVisible = await createNew
+      .waitFor({ state: 'visible', timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
 
-    const el = await Promise.race([changeDbPromise, createNewPromise]);
-    if (el === 'change-db') {
+    if (!createNewVisible) {
+      await changeDb.waitFor({ state: 'visible' });
       await changeDb.click();
-      await createNewPromise;
+      await createNew.waitFor({ state: 'visible' });
     }
 
     t.ok(await createNew.isVisible(), 'create new is visible');
@@ -176,6 +184,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Chart of Accounts screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Chart of Accounts maintains dir="rtl"');
 
@@ -201,6 +210,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Accounting Entry screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Accounting Entry screen maintains dir="rtl"');
 
@@ -222,6 +232,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Settings screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Settings screen maintains dir="rtl"');
 
@@ -245,6 +256,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       'Report screen identity confirmed'
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'Report screen maintains dir="rtl"');
 
@@ -263,6 +275,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       `General Ledger route open (${url})`
     );
 
+    await window.waitForSelector('#app[dir]');
     const appDir = await window.getAttribute('#app', 'dir');
     t.equal(appDir, 'rtl', 'General Ledger screen maintains dir="rtl"');
 
