@@ -47,9 +47,15 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   // Mock native Electron dialogs so modal prompts do not block automated CI tests
-  // Note: dialog.showMessageBox is mocked to return default button response (0) so native OS modal dialogs do not block headless Playwright automation.
-  await electronApp.evaluate(({ dialog }) => {
+  // showMessageBox: returns default button (0) so alert/confirm dialogs don't stall.
+  // showSaveDialog: returns a deterministic temp path so the "save new database" prompt
+  //   that appears when the SetupWizard completes doesn't block headless automation.
+  await electronApp.evaluate(({ dialog, app }) => {
     dialog.showMessageBox = async () => ({ response: 0 });
+    dialog.showSaveDialog = async () => ({
+      canceled: false,
+      filePath: require('path').join(app.getPath('temp'), 'duhgoods-uitest.db'),
+    });
   });
 
   const window = await electronApp.firstWindow();
@@ -141,7 +147,7 @@ async function checkVisibleEnglishGate(window, screenName, t) {
     await window.getByTestId('submit-button').click();
 
     const companyNameEl = window.getByTestId('company-name');
-    await companyNameEl.waitFor({ state: 'visible', timeout: 60_000 });
+    await companyNameEl.waitFor({ state: 'visible', timeout: 120_000 });
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(
       `[UI Test Metric] Instance initialization duration: ${duration}s under Xvfb`
@@ -168,6 +174,9 @@ async function checkVisibleEnglishGate(window, screenName, t) {
   });
 
   test('5. UI Acceptance: Chart of Accounts Screen Navigation & Identity', async (t) => {
+    // Wait for the Desk to be ready (SA setup can take > 3 min on slow hardware)
+    await window.getByTestId('company-name').waitFor({ state: 'visible', timeout: 120_000 });
+
     await window.evaluate(() => {
       window.location.hash = '#/chart-of-accounts';
     });
