@@ -50,6 +50,9 @@ const ALLOWLIST = new Set([
 const KNOWN_INCORRECT_PATTERNS = [
   /ايصال\s/i, // missing hamza in إيصال
   /ايصالات/i,
+  /ادخال\s/i, // missing hamza in إدخال
+  /ادخالات/i,
+  /قالب\s+الطابعة/i, // unnatural print template wording
 ];
 
 tape('Arabic Localization Validation Suite', (t) => {
