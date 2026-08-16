@@ -113,6 +113,23 @@ export class BankStatementImporter implements ImportAdapter {
     const creditStr = parseDecimalString(row.credit, 'credit', errors);
 
     if (errors.length === 0) {
+      // Debit and credit columns hold magnitudes — a negative magnitude reverses
+      // financial direction and is always a source-data error.
+      if (debitStr.startsWith('-')) {
+        errors.push(
+          `debit must be a non-negative magnitude: "${debitStr}" — ` +
+            'direction is determined by the column, not the sign'
+        );
+      }
+      if (creditStr.startsWith('-')) {
+        errors.push(
+          `credit must be a non-negative magnitude: "${creditStr}" — ` +
+            'direction is determined by the column, not the sign'
+        );
+      }
+    }
+
+    if (errors.length === 0) {
       // Use pesa for monetary zero-comparison — never JS Number.
       const debitZero = _pesa(debitStr).isZero();
       const creditZero = _pesa(creditStr).isZero();
@@ -161,7 +178,13 @@ export class BankStatementImporter implements ImportAdapter {
 }
 
 /**
- * Validates that `value` is a parseable finite decimal number and returns the
+ * Strict decimal grammar — rejects scientific notation, hex, Infinity, NaN.
+ * Accepts: optional leading minus, integer part, optional decimal part.
+ */
+const DECIMAL_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+
+/**
+ * Validates that `value` is a strict finite decimal string and returns the
  * ORIGINAL source string — never a JS Number — to preserve source precision.
  * Returns '0' on empty/null/undefined (not an error — blank debit/credit is normal).
  */
@@ -172,9 +195,7 @@ function parseDecimalString(
 ): string {
   if (value === undefined || value === null || value === '') return '0';
   const str = String(value).trim();
-  // Number() is used ONLY for format validation (finite check), not for monetary arithmetic.
-  const n = Number(str);
-  if (!isFinite(n)) {
+  if (!DECIMAL_RE.test(str)) {
     errors.push(`${field} is not a valid finite number: ${str}`);
     return '0';
   }

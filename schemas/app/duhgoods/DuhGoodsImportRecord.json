@@ -20,15 +20,38 @@
       "label": "Source Type",
       "fieldtype": "Select",
       "required": true,
-      "options": "woocommerce\nbank_statement\npsp_export\nmanual",
+      "options": ["woocommerce", "bank_statement", "psp_export", "manual"],
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceNamespace",
+      "label": "Source Namespace",
+      "fieldtype": "Data",
+      "required": true,
       "readOnly": true,
       "section": "Default"
     },
     {
       "fieldname": "sourceId",
-      "label": "Source ID",
+      "label": "External Source ID",
       "fieldtype": "Data",
       "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "identityKey",
+      "label": "Identity Key (SHA-256)",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "rowLocator",
+      "label": "Row Locator",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
       "section": "Default"
     },
     {
@@ -36,7 +59,16 @@
       "label": "Transaction Type",
       "fieldtype": "Select",
       "required": true,
-      "options": "order\npayment\nrefund\nfee\nbank_credit\nbank_debit\nsettlement\nchargeback",
+      "options": [
+        "order",
+        "payment",
+        "refund",
+        "fee",
+        "bank_credit",
+        "bank_debit",
+        "settlement",
+        "chargeback"
+      ],
       "readOnly": true,
       "section": "Default"
     },
@@ -88,14 +120,14 @@
       "label": "Status",
       "fieldtype": "Select",
       "required": true,
-      "options": "pending\nreconciled\nunmatched\nexception",
+      "options": ["pending", "reconciled", "unmatched", "exception"],
       "default": "pending",
       "section": "Reconciliation"
     },
     {
       "fieldname": "rawData",
       "label": "Raw Data (JSON)",
-      "fieldtype": "Long Text",
+      "fieldtype": "Text",
       "readOnly": true,
       "section": "Evidence"
     },
@@ -104,6 +136,21 @@
       "label": "Evidence Hash (SHA-256)",
       "fieldtype": "Data",
       "unique": true,
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "evidenceVersion",
+      "label": "Evidence Version",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 1,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "priorEvidenceHash",
+      "label": "Prior Evidence Hash",
+      "fieldtype": "Data",
       "readOnly": true,
       "section": "Evidence"
     },
@@ -117,12 +164,14 @@
   "quickEditFields": [
     "importSource",
     "sourceType",
+    "sourceNamespace",
     "sourceId",
     "transactionType",
     "transactionDate",
     "currency",
     "grossAmount",
     "netAmount",
-    "status"
+    "status",
+    "evidenceVersion"
   ]
 }

@@ -14,11 +14,19 @@
       "section": "Default"
     },
     {
+      "fieldname": "sourceNamespace",
+      "label": "Source Namespace",
+      "fieldtype": "Data",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
       "fieldname": "sourceType",
       "label": "Source Type",
       "fieldtype": "Select",
       "required": true,
-      "options": "woocommerce\nbank_statement\npsp_export\nmanual",
+      "options": ["woocommerce", "bank_statement", "psp_export", "manual"],
       "section": "Default"
     },
     {
@@ -51,11 +59,43 @@
       "section": "Default"
     },
     {
+      "fieldname": "importedCount",
+      "label": "Imported",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
+      "fieldname": "skippedCount",
+      "label": "Skipped",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
+      "fieldname": "exceptionCount",
+      "label": "Exceptions",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
+      "fieldname": "errorCount",
+      "label": "Errors",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "default": 0,
+      "section": "Default"
+    },
+    {
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Select",
       "required": true,
-      "options": "pending\nimported\npartial\nfailed",
+      "options": ["pending", "imported", "partial", "failed"],
       "default": "pending",
       "section": "Default"
     },
@@ -69,10 +109,15 @@
   ],
   "quickEditFields": [
     "sourceName",
+    "sourceNamespace",
     "sourceType",
     "importedAt",
     "sourceFile",
     "recordCount",
+    "importedCount",
+    "skippedCount",
+    "exceptionCount",
+    "errorCount",
     "status"
   ]
 }

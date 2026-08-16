@@ -180,17 +180,23 @@ async function checkVisibleEnglishGate(window, screenName, t) {
       .waitFor({ state: 'visible', timeout: 120_000 });
 
     await window.evaluate(async () => {
-      const app = document.querySelector('#app')?.__vue_app__;
+      const app = document.body.__vue_app__;
       await app?.config.globalProperties.$router.push('/chart-of-accounts');
     });
     await window
       .waitForURL('**/chart-of-accounts**', { timeout: 10_000 })
       .catch(() => {});
 
-    const url = window.url();
+    const routePath5 = await window.evaluate(() => {
+      const app = document.body.__vue_app__;
+      return (
+        app?.config.globalProperties.$router?.currentRoute?.value?.fullPath ??
+        ''
+      );
+    });
     t.ok(
-      url.includes('chart-of-accounts'),
-      `Chart of Accounts route open (${url})`
+      routePath5.includes('chart-of-accounts'),
+      `Chart of Accounts route open (${routePath5})`
     );
 
     const pageText = await window.locator('body').innerText();
@@ -208,17 +214,23 @@ async function checkVisibleEnglishGate(window, screenName, t) {
 
   test('6. UI Acceptance: Accounting Entry Screen Navigation & Identity', async (t) => {
     await window.evaluate(async () => {
-      const app = document.querySelector('#app')?.__vue_app__;
+      const app = document.body.__vue_app__;
       await app?.config.globalProperties.$router.push('/list/SalesInvoice');
     });
     await window
       .waitForURL('**/SalesInvoice**', { timeout: 10_000 })
       .catch(() => {});
 
-    const url = window.url();
+    const routePath6 = await window.evaluate(() => {
+      const app = document.body.__vue_app__;
+      return (
+        app?.config.globalProperties.$router?.currentRoute?.value?.fullPath ??
+        ''
+      );
+    });
     t.ok(
-      url.includes('SalesInvoice'),
-      `Sales Invoice document route open (${url})`
+      routePath6.includes('SalesInvoice'),
+      `Sales Invoice document route open (${routePath6})`
     );
 
     const pageText = await window.locator('body').innerText();
@@ -237,15 +249,24 @@ async function checkVisibleEnglishGate(window, screenName, t) {
 
   test('7. UI Acceptance: Settings Screen Navigation & Identity', async (t) => {
     await window.evaluate(async () => {
-      const app = document.querySelector('#app')?.__vue_app__;
+      const app = document.body.__vue_app__;
       await app?.config.globalProperties.$router.push('/settings');
     });
     await window
       .waitForURL('**/settings**', { timeout: 10_000 })
       .catch(() => {});
 
-    const url = window.url();
-    t.ok(url.includes('settings'), `Settings route open (${url})`);
+    const routePath7 = await window.evaluate(() => {
+      const app = document.body.__vue_app__;
+      return (
+        app?.config.globalProperties.$router?.currentRoute?.value?.fullPath ??
+        ''
+      );
+    });
+    t.ok(
+      routePath7.includes('settings'),
+      `Settings route open (${routePath7})`
+    );
 
     const pageText = await window.locator('body').innerText();
     t.ok(
@@ -262,15 +283,21 @@ async function checkVisibleEnglishGate(window, screenName, t) {
 
   test('8. UI Acceptance: Report Screen Navigation & Identity', async (t) => {
     await window.evaluate(async () => {
-      const app = document.querySelector('#app')?.__vue_app__;
+      const app = document.body.__vue_app__;
       await app?.config.globalProperties.$router.push('/report/ProfitAndLoss');
     });
     await window
       .waitForURL('**/report/ProfitAndLoss**', { timeout: 10_000 })
       .catch(() => {});
 
-    const url = window.url();
-    t.ok(url.includes('report'), `Report route open (${url})`);
+    const routePath8 = await window.evaluate(() => {
+      const app = document.body.__vue_app__;
+      return (
+        app?.config.globalProperties.$router?.currentRoute?.value?.fullPath ??
+        ''
+      );
+    });
+    t.ok(routePath8.includes('report'), `Report route open (${routePath8})`);
 
     const pageText = await window.locator('body').innerText();
     t.ok(
@@ -289,17 +316,24 @@ async function checkVisibleEnglishGate(window, screenName, t) {
 
   test('9. UI Acceptance: General Ledger Screen — Arabic title, RTL, no English leak', async (t) => {
     await window.evaluate(async () => {
-      const app = document.querySelector('#app')?.__vue_app__;
+      const app = document.body.__vue_app__;
       await app?.config.globalProperties.$router.push('/report/GeneralLedger');
     });
     await window
       .waitForURL('**/GeneralLedger**', { timeout: 10_000 })
       .catch(() => {});
 
-    const url = window.url();
+    const routePath9 = await window.evaluate(() => {
+      const app = document.body.__vue_app__;
+      return (
+        app?.config.globalProperties.$router?.currentRoute?.value?.fullPath ??
+        ''
+      );
+    });
     t.ok(
-      url.includes('GeneralLedger') || url.includes('general-ledger'),
-      `General Ledger route open (${url})`
+      routePath9.includes('GeneralLedger') ||
+        routePath9.includes('general-ledger'),
+      `General Ledger route open (${routePath9})`
     );
 
     await window.waitForSelector('#app[dir]');

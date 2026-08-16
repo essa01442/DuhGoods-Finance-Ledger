@@ -9,6 +9,7 @@ import fixLedgerDateTime from './v0_21_0/fixLedgerDateTime';
 import fixItemHSNField from './fixItemHSNField';
 import createPaymentMethods from './createPaymentMethods';
 import createDuhGoodsTables from './createDuhGoodsTables';
+import createDuhGoodsEvidenceIndex from './createDuhGoodsEvidenceIndex';
 
 export default [
   { name: 'testPatch', version: '0.5.0-beta.0', patch: testPatch },
@@ -53,5 +54,10 @@ export default [
     name: 'createDuhGoodsTables',
     version: '0.38.0',
     patch: createDuhGoodsTables,
+  },
+  {
+    name: 'createDuhGoodsEvidenceIndex',
+    version: '0.38.1',
+    patch: createDuhGoodsEvidenceIndex,
   },
 ] as Patch[];

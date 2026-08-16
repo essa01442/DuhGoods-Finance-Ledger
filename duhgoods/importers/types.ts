@@ -58,6 +58,7 @@ export interface ImportResult {
   sourceId: string;
   imported: number;
   skipped: number;
+  exceptions: number;
   errors: ImportError[];
 }
 
