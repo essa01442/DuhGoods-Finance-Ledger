@@ -9,7 +9,9 @@ import { StockLedger } from './StockLedger';
 import { ReferenceType, SerialNumberStatus } from './types';
 
 export class StockBalance extends StockLedger {
-  static title = t`Stock Balance`;
+  static get title(): string {
+    return t`Stock Balance`;
+  }
   static reportName = 'stock-balance';
   static isInventory = true;
 

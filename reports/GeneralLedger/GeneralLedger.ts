@@ -22,7 +22,9 @@ type ReferenceType =
   | 'All';
 
 export class GeneralLedger extends LedgerReport {
-  static title = t`General Ledger`;
+  static get title(): string {
+    return t`General Ledger`;
+  }
   static reportName = 'general-ledger';
   usePagination = true;
   loading = false;

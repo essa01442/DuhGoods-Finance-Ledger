@@ -15,7 +15,9 @@ import { getRawStockLedgerEntries, getStockLedgerEntries } from './helpers';
 import { ComputedStockLedgerEntry, ReferenceType } from './types';
 
 export class StockLedger extends Report {
-  static title = t`Stock Ledger`;
+  static get title(): string {
+    return t`Stock Ledger`;
+  }
   static reportName = 'stock-ledger';
   static isInventory = true;
 
