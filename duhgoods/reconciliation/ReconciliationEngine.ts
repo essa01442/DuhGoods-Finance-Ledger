@@ -125,6 +125,10 @@ function scorePair(left: ReconciliationRecord, right: ReconciliationRecord, rela
 
   const confidence: ReconciliationConfidence = reasonCodes.includes('explicit_reference') ? 'exact' : dateDeltaDays <= 1 ? 'high' : 'medium';
   const [first, second] = [left.name, right.name].sort();
+  const firstRecord = left.name === first ? left : right;
+  const secondRecord = left.name === first ? right : left;
+  const firstAmount = left.name === first ? leftAmount : rightAmount;
+  const secondAmount = left.name === first ? rightAmount : leftAmount;
   const edgeKey = `${first}:${second}`;
   return {
     leftRecord: first,
@@ -135,17 +139,17 @@ function scorePair(left: ReconciliationRecord, right: ReconciliationRecord, rela
     amountDelta,
     dateDeltaDays,
     edgeKey,
-    leftEvidenceHash: left.evidenceHash ?? '',
-    rightEvidenceHash: right.evidenceHash ?? '',
+    leftEvidenceHash: firstRecord.evidenceHash ?? '',
+    rightEvidenceHash: secondRecord.evidenceHash ?? '',
     evidenceSnapshot: JSON.stringify({
       leftRecord: first,
       rightRecord: second,
-      leftEvidenceHash: left.evidenceHash ?? '',
-      rightEvidenceHash: right.evidenceHash ?? '',
-      leftCurrency: left.currency,
-      rightCurrency: right.currency,
-      leftAmount: leftAmount.store,
-      rightAmount: rightAmount.store,
+      leftEvidenceHash: firstRecord.evidenceHash ?? '',
+      rightEvidenceHash: secondRecord.evidenceHash ?? '',
+      leftCurrency: firstRecord.currency,
+      rightCurrency: secondRecord.currency,
+      leftAmount: firstAmount.store,
+      rightAmount: secondAmount.store,
       dateDeltaDays,
       reasonCodes,
     }),

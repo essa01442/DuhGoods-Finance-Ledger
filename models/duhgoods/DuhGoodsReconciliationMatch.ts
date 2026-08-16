@@ -59,7 +59,19 @@ export class DuhGoodsReconciliationMatch extends Doc {
 function sameImmutableValue(stored: unknown, current: unknown): boolean {
   if (stored == null && current == null) return true;
   if (stored == null || current == null) return false;
-  if (typeof stored === 'object' && 'store' in stored && typeof current === 'object' && 'store' in current) return stored.store === current.store;
+
+  const storedIsMoney = typeof stored === 'object' && stored !== null && 'store' in stored;
+  const currentIsMoney = typeof current === 'object' && current !== null && 'store' in current;
+  if (storedIsMoney && currentIsMoney) return (stored as Money).store === (current as Money).store;
+  if (storedIsMoney) return (stored as Money).store === String(current);
+  if (currentIsMoney) return String(stored) === (current as Money).store;
+
   if (stored instanceof Date && current instanceof Date) return stored.getTime() === current.getTime();
+  if (stored instanceof Date || current instanceof Date) {
+    const storedDate = new Date(String(stored));
+    const currentDate = new Date(String(current));
+    return !Number.isNaN(storedDate.getTime()) && storedDate.getTime() === currentDate.getTime();
+  }
+
   return String(stored) === String(current);
 }
