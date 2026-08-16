@@ -55,7 +55,7 @@
       "label": "Status",
       "fieldtype": "Select",
       "required": true,
-      "options": "pending\nimported\nerror",
+      "options": "pending\nimported\npartial\nfailed",
       "default": "pending",
       "section": "Default"
     }

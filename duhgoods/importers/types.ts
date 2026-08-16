@@ -36,7 +36,31 @@ export interface ImportError {
   raw?: unknown;
 }
 
+/**
+ * Thrown by adapters when source data fails validation before a transaction
+ * can be safely constructed. Callers must catch this and produce an ImportError.
+ */
+export class ImportValidationError extends Error {
+  readonly validationErrors: string[];
+  readonly sourceId: string | undefined;
+  readonly raw: Record<string, unknown>;
+
+  constructor(
+    validationErrors: string[],
+    sourceId: string | undefined,
+    raw: Record<string, unknown>
+  ) {
+    super(validationErrors.join('; '));
+    this.name = 'ImportValidationError';
+    this.validationErrors = validationErrors;
+    this.sourceId = sourceId;
+    this.raw = raw;
+  }
+}
+
 export interface ImportAdapter {
   readonly sourceType: SourceType;
-  parse(input: string | Buffer): ImportedTransaction[] | Promise<ImportedTransaction[]>;
+  parse(
+    input: string | Buffer
+  ): ImportedTransaction[] | Promise<ImportedTransaction[]>;
 }

@@ -1,6 +1,7 @@
 import {
   ImportAdapter,
   ImportedTransaction,
+  ImportValidationError,
   SourceType,
   TransactionType,
 } from './types';
@@ -17,6 +18,15 @@ interface PSPRow {
   net?: string | number;
   [key: string]: unknown;
 }
+
+const SUPPORTED_TYPES: ReadonlySet<string> = new Set([
+  'payment',
+  'payout',
+  'refund',
+  'chargeback',
+  'fee',
+  'transfer',
+]);
 
 const TYPE_MAP: Record<string, TransactionType> = {
   payment: 'payment',
@@ -42,23 +52,50 @@ export class PSPExportImporter implements ImportAdapter {
   }
 
   private _mapRow(row: PSPRow, idx: number): ImportedTransaction {
+    const errors: string[] = [];
     const sourceId = String(row.id ?? `psp-${idx}`);
-    const rawType = (row.type ?? '').toLowerCase();
-    const transactionType: TransactionType = TYPE_MAP[rawType] ?? 'payment';
+    const rawType = (row.type ?? '').toLowerCase().trim();
 
-    const dateStr = row.date ?? row.created ?? '';
-    const transactionDate = dateStr ? new Date(dateStr) : new Date();
+    if (!rawType) {
+      errors.push('transaction type is missing');
+    } else if (!SUPPORTED_TYPES.has(rawType)) {
+      errors.push(
+        `unsupported PSP transaction type "${rawType}" — must be one of: ${[
+          ...SUPPORTED_TYPES,
+        ].join(', ')}`
+      );
+    }
 
-    const gross = Number(row.gross ?? 0);
-    const fee = Number(row.fee ?? 0);
-    const tax = Number(row.tax ?? 0);
-    const net = row.net !== undefined ? Number(row.net) : gross - fee - tax;
+    const dateStr = (row.date ?? row.created ?? '').trim();
+    if (!dateStr) {
+      errors.push('transaction date is missing');
+    }
+    const transactionDate = dateStr ? new Date(dateStr) : null;
+    if (transactionDate !== null && isNaN(transactionDate.getTime())) {
+      errors.push(`transaction date is invalid: "${dateStr}"`);
+    }
+
+    const gross = parseFiniteNumber(row.gross, 'gross', errors);
+    const fee = parseFiniteNumber(row.fee, 'fee', errors);
+    const tax = parseFiniteNumber(row.tax, 'tax', errors);
+    const net =
+      row.net !== undefined
+        ? parseFiniteNumber(row.net, 'net', errors)
+        : gross - fee - tax;
+
+    if (errors.length > 0) {
+      throw new ImportValidationError(
+        errors,
+        sourceId,
+        row as Record<string, unknown>
+      );
+    }
 
     return {
       sourceId,
       sourceType: 'psp_export',
-      transactionType,
-      transactionDate,
+      transactionType: TYPE_MAP[rawType],
+      transactionDate: transactionDate!,
       currency: (row.currency ?? 'SAR').toUpperCase(),
       grossAmount: gross,
       fees: fee,
@@ -67,4 +104,17 @@ export class PSPExportImporter implements ImportAdapter {
       rawData: row,
     };
   }
+}
+
+function parseFiniteNumber(
+  value: unknown,
+  field: string,
+  errors: string[]
+): number {
+  const n = Number(value);
+  if (!isFinite(n)) {
+    errors.push(`${field} is not a valid finite number: ${String(value)}`);
+    return 0;
+  }
+  return n;
 }

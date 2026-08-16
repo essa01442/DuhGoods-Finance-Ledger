@@ -1,19 +1,28 @@
 import { Fyo } from 'fyo';
 import { ModelNameEnum } from 'models/types';
-import { computeEvidenceHash } from '../evidence/EvidenceManager';
+import {
+  computeEvidenceHash,
+  computeFileHash,
+} from '../evidence/EvidenceManager';
 import {
   ImportAdapter,
   ImportError,
   ImportResult,
+  ImportValidationError,
   ImportedTransaction,
 } from './types';
 
 export interface OrchestratorOptions {
   sourceName: string;
   sourceFile?: string;
-  sourceHash?: string;
 }
 
+/**
+ * Maps (sourceType, sourceId) → evidenceHash so that the same external
+ * transaction from the same source namespace is never imported twice,
+ * even if the raw JSON happens to match a different source's record.
+ * Different sources sharing identical JSON are NOT treated as duplicates.
+ */
 export class ImportOrchestrator {
   private fyo: Fyo;
   private adapter: ImportAdapter;
@@ -27,7 +36,26 @@ export class ImportOrchestrator {
     input: string | Buffer,
     opts: OrchestratorOptions
   ): Promise<ImportResult> {
-    const transactions = await this.adapter.parse(input);
+    const rawBytes =
+      typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
+
+    // Compute the source-file hash from the exact original bytes BEFORE any
+    // parsing. This is the provenance hash for the import file itself.
+    const sourceHash = computeFileHash(rawBytes);
+
+    let transactions: ImportedTransaction[];
+    try {
+      const result = this.adapter.parse(rawBytes);
+      transactions = result instanceof Promise ? await result : result;
+    } catch (err) {
+      // Top-level parse failure — entire batch rejected before any records are created.
+      return {
+        sourceId: '',
+        imported: 0,
+        skipped: 0,
+        errors: [asImportError(err)],
+      };
+    }
 
     const importSourceDoc = this.fyo.doc.getNewDoc(
       ModelNameEnum.DuhGoodsImportSource
@@ -36,7 +64,7 @@ export class ImportOrchestrator {
     importSourceDoc.sourceType = this.adapter.sourceType;
     importSourceDoc.importedAt = new Date();
     importSourceDoc.sourceFile = opts.sourceFile ?? '';
-    importSourceDoc.sourceHash = opts.sourceHash ?? '';
+    importSourceDoc.sourceHash = sourceHash;
     importSourceDoc.recordCount = transactions.length;
     importSourceDoc.status = 'pending';
     await importSourceDoc.sync();
@@ -48,17 +76,30 @@ export class ImportOrchestrator {
     let skipped = 0;
 
     for (const txn of transactions) {
-      const result = await this._importOne(txn, importSourceId);
-      if (result === 'imported') {
+      const outcome = await this._importOne(txn, importSourceId);
+      if (outcome === 'imported') {
         imported++;
-      } else if (result === 'skipped') {
+      } else if (outcome === 'skipped') {
         skipped++;
       } else {
-        errors.push(result);
+        errors.push(outcome);
       }
     }
 
-    const finalStatus = errors.length > 0 ? 'error' : 'imported';
+    // Derive the batch status:
+    // - 'imported'  : all records processed without errors
+    // - 'partial'   : some imported, some errored
+    // - 'failed'    : all records errored (or zero imported and errors exist)
+    // - 'pending'   : nothing happened (empty batch)
+    let finalStatus: string;
+    if (errors.length === 0) {
+      finalStatus = 'imported';
+    } else if (imported > 0) {
+      finalStatus = 'partial';
+    } else {
+      finalStatus = 'failed';
+    }
+
     importSourceDoc.status = finalStatus;
     await importSourceDoc.sync();
 
@@ -69,7 +110,14 @@ export class ImportOrchestrator {
     txn: ImportedTransaction,
     importSourceId: string
   ): Promise<'imported' | 'skipped' | ImportError> {
-    const evidenceHash = computeEvidenceHash(txn.rawData);
+    // Identity: (sourceType, sourceId, evidenceHash).
+    // We require that the sourceType namespace matches so that two different
+    // source systems that happen to produce identical rawData are NOT collapsed.
+    const evidenceHash = computeEvidenceHash({
+      sourceType: txn.sourceType,
+      sourceId: txn.sourceId,
+      raw: txn.rawData,
+    });
 
     const existing = await this.fyo.db.getAll(
       ModelNameEnum.DuhGoodsImportRecord,
@@ -108,4 +156,15 @@ export class ImportOrchestrator {
       };
     }
   }
+}
+
+function asImportError(err: unknown): ImportError {
+  if (err instanceof ImportValidationError) {
+    return {
+      sourceId: err.sourceId,
+      message: err.message,
+      raw: err.raw,
+    };
+  }
+  return { message: err instanceof Error ? err.message : String(err) };
 }
