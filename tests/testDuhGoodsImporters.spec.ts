@@ -65,13 +65,8 @@ test('computeFileHash: deterministic', (t) => {
   t.end();
 });
 
-test('computeFileHash: hashes raw bytes; computeEvidenceHash hashes normalised object — same bytes, different semantics', (t) => {
-  // These two functions serve different purposes:
-  // computeFileHash  → SHA-256 of exact source-file bytes (provenance of the import file)
-  // computeEvidenceHash → SHA-256 of key-sorted canonical JSON of a normalised object
-  // We verify each is deterministic and that the same multi-record content
-  // produces a file hash that differs from the per-record evidence hash.
-  const sourceContent = JSON.stringify(wooOrdersValid); // multi-record file
+test('computeFileHash vs computeEvidenceHash: same multi-record source distinguishes batch from per-record', (t) => {
+  const sourceContent = JSON.stringify(wooOrdersValid);
   const fileHash = computeFileHash(sourceContent);
   const wooImporter = new WooCommerceImporter();
   const txns = wooImporter.parse(sourceContent);
@@ -112,10 +107,11 @@ const wooOrdersValid = [
     total_tax: '26.00',
     shipping_total: '0.00',
     discount_total: '0.00',
+    // No refunds[] — triggers synthetic full-refund path.
   },
 ];
 
-test('WooCommerceImporter: parses completed and refunded orders', (t) => {
+test('WooCommerceImporter: parses completed order and synthesises refund for refunded order', (t) => {
   const importer = new WooCommerceImporter();
   const txns = importer.parse(JSON.stringify(wooOrdersValid));
 
@@ -125,9 +121,11 @@ test('WooCommerceImporter: parses completed and refunded orders', (t) => {
   t.equal(txns[0].transactionType, 'order', 'completed → order');
   t.equal(txns[1].transactionType, 'refund', 'refunded → refund');
   t.equal(txns[0].currency, 'SAR', 'currency preserved');
-  t.equal(txns[0].grossAmount, 500, 'gross amount');
-  t.equal(txns[0].taxes, 65, 'tax amount');
-  t.equal(txns[0].fees, 0, 'fees = 0 (PSP fees are not WooCommerce fields)');
+  // Amounts are decimal strings, not JS Numbers.
+  t.equal(txns[0].grossAmount, '500.00', 'gross is source string');
+  t.equal(txns[0].taxes, '65.00', 'tax is source string');
+  t.equal(txns[0].fees, '0', 'fees = "0" (PSP fees absent in WooCommerce)');
+  t.equal(txns[0].netAmount, '435.000000', 'net = gross − taxes via pesa');
   t.end();
 });
 
@@ -204,23 +202,127 @@ test('WooCommerceImporter: skipped statuses produce no transactions', (t) => {
   t.end();
 });
 
-test('WooCommerceImporter: rawData preserves shipping and discount separately', (t) => {
+test('WooCommerceImporter: rawData is exact source bytes; shipping and discount go in normalizedMeta', (t) => {
   const importer = new WooCommerceImporter();
   const txns = importer.parse(JSON.stringify(wooOrdersValid));
+  // rawData must NOT be augmented — these keys must be absent.
   t.equal(
-    txns[0].rawData._woo_shipping_total,
-    20,
-    'shipping preserved in rawData'
+    txns[0].rawData['_woo_shipping_total'],
+    undefined,
+    '_woo_shipping_total absent from rawData'
   );
   t.equal(
-    txns[0].rawData._woo_discount_total,
-    10,
-    'discount preserved in rawData'
+    txns[0].rawData['_woo_discount_total'],
+    undefined,
+    '_woo_discount_total absent from rawData'
+  );
+  // Derived values go into normalizedMeta, not rawData.
+  t.equal(
+    txns[0].normalizedMeta?.shippingTotal,
+    '20.00',
+    'shippingTotal in normalizedMeta'
+  );
+  t.equal(
+    txns[0].normalizedMeta?.discountTotal,
+    '10.00',
+    'discountTotal in normalizedMeta'
   );
   t.equal(
     txns[0].fees,
-    0,
-    'fees field is NOT populated from WooCommerce fields'
+    '0',
+    'fees not populated from WooCommerce shipping/discount'
+  );
+  t.end();
+});
+
+test('WooCommerceImporter: refunds[] array produces individual refund records', (t) => {
+  const importer = new WooCommerceImporter();
+  const orders = [
+    {
+      id: 500,
+      status: 'completed',
+      date_paid: '2024-01-15T10:00:00',
+      currency: 'SAR',
+      total: '500.00',
+      total_tax: '65.00',
+      shipping_total: '0.00',
+      discount_total: '0.00',
+      refunds: [
+        {
+          id: 9001,
+          date_created: '2024-01-20T10:00:00',
+          amount: '100.00',
+          reason: 'partial return',
+        },
+      ],
+    },
+  ];
+  const txns = importer.parse(JSON.stringify(orders));
+  // Completed order + one partial refund from refunds[].
+  t.equal(txns.length, 2, 'order + one refund record');
+  t.equal(txns[0].transactionType, 'order', 'first is order');
+  t.equal(txns[0].sourceId, '500', 'order sourceId');
+  t.equal(txns[1].transactionType, 'refund', 'second is refund');
+  t.equal(txns[1].sourceId, '9001', 'refund sourceId from refund.id');
+  // WooCommerce refund amounts are positive in source; adapter negates.
+  t.equal(txns[1].grossAmount, '-100.000000', 'refund gross is negated');
+  t.equal(txns[1].netAmount, '-100.000000', 'refund net is negated');
+  t.equal(txns[1].fees, '0', 'refund fees = "0"');
+  t.equal(txns[1].taxes, '0', 'refund taxes = "0"');
+  t.equal(
+    txns[1].normalizedMeta?.parentOrderId,
+    '500',
+    'parentOrderId in normalizedMeta'
+  );
+  // rawData for the refund is the refund object, not the parent order.
+  t.equal(
+    (txns[1].rawData as { id: number }).id,
+    9001,
+    'refund rawData is refund object'
+  );
+  t.end();
+});
+
+test('WooCommerceImporter: refunded status with refunds[] imports individual refunds (not order)', (t) => {
+  const importer = new WooCommerceImporter();
+  const orders = [
+    {
+      id: 600,
+      status: 'refunded',
+      date_paid: '2024-01-15T10:00:00',
+      currency: 'SAR',
+      total: '300.00',
+      total_tax: '39.00',
+      shipping_total: '0.00',
+      discount_total: '0.00',
+      refunds: [
+        { id: 9002, date_created: '2024-01-16T10:00:00', amount: '300.00' },
+      ],
+    },
+  ];
+  const txns = importer.parse(JSON.stringify(orders));
+  // refunded status + refunds[] → only the refund records, not the order.
+  t.equal(txns.length, 1, 'only refund records, not the order');
+  t.equal(txns[0].sourceId, '9002', 'refund sourceId');
+  t.equal(txns[0].transactionType, 'refund', 'transaction type is refund');
+  t.equal(txns[0].grossAmount, '-300.000000', 'refund gross negated');
+  t.end();
+});
+
+test('WooCommerceImporter: synthetic full refund sign convention (refunded, no refunds[])', (t) => {
+  const importer = new WooCommerceImporter();
+  // wooOrdersValid[1] is status='refunded' with no refunds[] array.
+  const txns = importer.parse(JSON.stringify(wooOrdersValid));
+  const refund = txns[1];
+  t.equal(refund.transactionType, 'refund', 'refund type');
+  t.equal(refund.grossAmount, '-200.000000', 'gross is negated order total');
+  t.equal(refund.taxes, '-26.000000', 'taxes is negated order tax');
+  t.equal(refund.fees, '0', 'fees = "0"');
+  // netAmount = gross − taxes = -200 − (-26) = -174
+  t.equal(refund.netAmount, '-174.000000', 'net = gross − taxes');
+  t.ok(
+    refund.normalizedMeta?.syntheticFullRefund,
+    'syntheticFullRefund flag in normalizedMeta'
   );
   t.end();
 });
@@ -236,6 +338,54 @@ test('WooCommerceImporter: rejects non-array input', (t) => {
 });
 
 // ── WooCommerceImporter — rejection cases ───────────────────────────────────
+
+test('WooCommerceImporter: missing currency throws ImportValidationError', (t) => {
+  const importer = new WooCommerceImporter();
+  const orders = [
+    {
+      id: 700,
+      status: 'completed',
+      date_paid: '2024-01-01T00:00:00',
+      // currency omitted — must not default to SAR
+      total: '100.00',
+      total_tax: '0.00',
+      shipping_total: '0.00',
+      discount_total: '0.00',
+    },
+  ];
+  t.throws(
+    () => importer.parse(JSON.stringify(orders)),
+    (err: unknown) =>
+      err instanceof ImportValidationError &&
+      /currency.*missing/i.test(err.message),
+    'throws ImportValidationError when currency is absent'
+  );
+  t.end();
+});
+
+test('WooCommerceImporter: blank currency throws ImportValidationError', (t) => {
+  const importer = new WooCommerceImporter();
+  const orders = [
+    {
+      id: 701,
+      status: 'completed',
+      date_paid: '2024-01-01T00:00:00',
+      currency: '   ',
+      total: '100.00',
+      total_tax: '0.00',
+      shipping_total: '0.00',
+      discount_total: '0.00',
+    },
+  ];
+  t.throws(
+    () => importer.parse(JSON.stringify(orders)),
+    (err: unknown) =>
+      err instanceof ImportValidationError &&
+      /currency.*missing/i.test(err.message),
+    'throws ImportValidationError for blank currency'
+  );
+  t.end();
+});
 
 test('WooCommerceImporter: unsupported status throws ImportValidationError', (t) => {
   const importer = new WooCommerceImporter();
@@ -367,7 +517,7 @@ const pspRowsValid = [
   },
 ];
 
-test('PSPExportImporter: parses valid rows', (t) => {
+test('PSPExportImporter: parses valid rows with decimal-string amounts', (t) => {
   const importer = new PSPExportImporter();
   const txns = importer.parse(JSON.stringify(pspRowsValid));
 
@@ -376,8 +526,14 @@ test('PSPExportImporter: parses valid rows', (t) => {
   t.equal(txns[1].transactionType, 'refund', 'refund type');
   t.equal(txns[2].transactionType, 'chargeback', 'chargeback type');
   t.equal(txns[0].sourceId, 'TXN-001', 'sourceId from id field');
-  t.equal(txns[0].fees, 9, 'fee captured');
-  t.equal(txns[0].netAmount, 289.65, 'net amount');
+  // Amounts are decimal strings, not JS Numbers.
+  t.equal(txns[0].fees, '9.00', 'fee is source string');
+  t.equal(
+    txns[0].netAmount,
+    '289.65',
+    'net is source string (explicitly provided)'
+  );
+  t.equal(txns[0].grossAmount, '300.00', 'gross is source string');
   t.end();
 });
 
@@ -419,7 +575,78 @@ test('PSPExportImporter: payout maps to settlement', (t) => {
   t.end();
 });
 
+test('PSPExportImporter: computed net when source net absent (pesa arithmetic)', (t) => {
+  const importer = new PSPExportImporter();
+  const rows = [
+    // net field omitted — importer must compute gross − fee − tax via pesa
+    {
+      id: 'C1',
+      type: 'payment',
+      date: '2024-01-01',
+      currency: 'SAR',
+      gross: '300.00',
+      fee: '9.00',
+      tax: '1.35',
+    },
+  ];
+  const txns = importer.parse(JSON.stringify(rows));
+  // 300.00 − 9.00 − 1.35 = 289.65 → pesa stores as '289.650000'
+  t.equal(
+    txns[0].netAmount,
+    '289.650000',
+    'pesa-computed net has 6 decimal places'
+  );
+  t.end();
+});
+
 // ── PSPExportImporter — rejection cases ─────────────────────────────────────
+
+test('PSPExportImporter: missing currency throws ImportValidationError', (t) => {
+  const importer = new PSPExportImporter();
+  const rows = [
+    {
+      id: 'C2',
+      type: 'payment',
+      date: '2024-01-01',
+      gross: '100',
+      fee: '0',
+      tax: '0',
+      net: '100',
+    },
+  ];
+  t.throws(
+    () => importer.parse(JSON.stringify(rows)),
+    (err: unknown) =>
+      err instanceof ImportValidationError &&
+      /currency.*missing/i.test(err.message),
+    'throws ImportValidationError when currency absent — no SAR default'
+  );
+  t.end();
+});
+
+test('PSPExportImporter: missing id throws ImportValidationError', (t) => {
+  const importer = new PSPExportImporter();
+  const rows = [
+    // id omitted — must not fall back to psp-${idx}
+    {
+      type: 'payment',
+      date: '2024-01-01',
+      currency: 'SAR',
+      gross: '100',
+      fee: '0',
+      tax: '0',
+      net: '100',
+    },
+  ];
+  t.throws(
+    () => importer.parse(JSON.stringify(rows)),
+    (err: unknown) =>
+      err instanceof ImportValidationError &&
+      /transaction id.*missing/i.test(err.message),
+    'throws ImportValidationError for missing id — row index must not masquerade as source ID'
+  );
+  t.end();
+});
 
 test('PSPExportImporter: unknown type throws ImportValidationError (no silent fallback)', (t) => {
   const importer = new PSPExportImporter();
@@ -440,7 +667,7 @@ test('PSPExportImporter: unknown type throws ImportValidationError (no silent fa
     (err: unknown) =>
       err instanceof ImportValidationError &&
       /unsupported PSP transaction type/.test(err.message),
-    'throws ImportValidationError for unknown PSP type — never silently becomes payment'
+    'throws ImportValidationError for unknown PSP type'
   );
   t.end();
 });
@@ -540,8 +767,6 @@ test('PSPExportImporter: NaN gross throws ImportValidationError', (t) => {
 });
 
 test('PSPExportImporter: string "Infinity" fee throws ImportValidationError', (t) => {
-  // Real JSON payloads cannot contain JS Infinity; a string "Infinity" is the
-  // realistic representation that Number("Infinity") = Infinity (non-finite).
   const importer = new PSPExportImporter();
   const rows = [
     {
@@ -560,7 +785,7 @@ test('PSPExportImporter: string "Infinity" fee throws ImportValidationError', (t
     (err: unknown) =>
       err instanceof ImportValidationError &&
       /not a valid finite number/i.test(err.message),
-    'throws for string "Infinity" fee (Number("Infinity") is not finite)'
+    'throws for string "Infinity" fee'
   );
   t.end();
 });
@@ -594,17 +819,26 @@ const bankRowsValid = [
   },
 ];
 
-test('BankStatementImporter: parses credit and debit rows', (t) => {
+test('BankStatementImporter: parses credit and debit rows with decimal-string amounts', (t) => {
   const importer = new BankStatementImporter('SAR');
   const txns = importer.parse(JSON.stringify(bankRowsValid));
 
   t.equal(txns.length, 2, 'two rows');
   t.equal(txns[0].transactionType, 'bank_credit', 'credit row');
   t.equal(txns[1].transactionType, 'bank_debit', 'debit row');
-  t.equal(txns[0].grossAmount, 1500, 'credit amount');
-  t.equal(txns[1].grossAmount, 800, 'debit amount (magnitude)');
-  t.equal(txns[0].netAmount, 1500, 'credit net positive');
-  t.equal(txns[1].netAmount, -800, 'debit net negative');
+  // Amounts are decimal strings, not JS Numbers.
+  t.equal(
+    txns[0].grossAmount,
+    '1500.00',
+    'credit grossAmount is source string'
+  );
+  t.equal(
+    txns[1].grossAmount,
+    '800.00',
+    'debit grossAmount is magnitude (positive source string)'
+  );
+  t.equal(txns[0].netAmount, '1500.00', 'credit net = credit amount');
+  t.equal(txns[1].netAmount, '-800.000000', 'debit net is negated via pesa');
   t.equal(txns[0].sourceId, 'REF001', 'reference used as sourceId');
   t.end();
 });
@@ -616,7 +850,7 @@ test('BankStatementImporter: uses default SAR currency', (t) => {
   t.end();
 });
 
-test('BankStatementImporter: row without reference uses internal-seq prefix', (t) => {
+test('BankStatementImporter: row without reference uses internal-seq prefix; flag in normalizedMeta', (t) => {
   const importer = new BankStatementImporter('SAR');
   const rows = [{ date: '2024-01-01', credit: '100.00', debit: '' }];
   const txns = importer.parse(JSON.stringify(rows));
@@ -624,10 +858,32 @@ test('BankStatementImporter: row without reference uses internal-seq prefix', (t
     txns[0].sourceId.startsWith('internal-seq-'),
     'generated sourceId has internal-seq prefix'
   );
+  // _hasSourceRef must NOT appear in rawData (no augmentation).
   t.equal(
-    txns[0].rawData._hasSourceRef,
+    txns[0].rawData['_hasSourceRef'],
+    undefined,
+    '_hasSourceRef absent from rawData'
+  );
+  t.equal(
+    txns[0].normalizedMeta?.hasSourceRef,
     false,
-    'rawData records absence of source reference'
+    'hasSourceRef in normalizedMeta'
+  );
+  t.end();
+});
+
+test('BankStatementImporter: row with reference; hasSourceRef true in normalizedMeta', (t) => {
+  const importer = new BankStatementImporter('SAR');
+  const txns = importer.parse(JSON.stringify(bankRowsValid));
+  t.equal(
+    txns[0].rawData['_hasSourceRef'],
+    undefined,
+    '_hasSourceRef absent from rawData'
+  );
+  t.equal(
+    txns[0].normalizedMeta?.hasSourceRef,
+    true,
+    'hasSourceRef=true in normalizedMeta'
   );
   t.end();
 });
@@ -672,7 +928,7 @@ test('BankStatementImporter: invalid date throws ImportValidationError', (t) => 
   t.end();
 });
 
-test('BankStatementImporter: zero-value row (both zero) throws ImportValidationError', (t) => {
+test('BankStatementImporter: zero-value row throws ImportValidationError', (t) => {
   const importer = new BankStatementImporter('SAR');
   const rows = [
     { date: '2024-01-01', credit: '0', debit: '0', reference: 'REF000' },
@@ -737,6 +993,101 @@ test('BankStatementImporter: string "Infinity" debit throws ImportValidationErro
   t.end();
 });
 
+// ── Decimal precision regression tests ───────────────────────────────────────
+
+test('Decimal precision: 100.10 - 10.01 is exact via pesa (would be 90.08999... via JS float)', (t) => {
+  // Prove that JS floating-point gives a wrong result, pesa gives the right one.
+  const jsFloat = 100.1 - 10.01;
+  t.notEqual(jsFloat, 90.09, 'JS float subtraction is imprecise for this pair');
+
+  const importer = new PSPExportImporter();
+  const rows = [
+    // No explicit net — importer must compute via pesa.
+    {
+      id: 'PREC-1',
+      type: 'payment',
+      date: '2024-01-01',
+      currency: 'SAR',
+      gross: '100.10',
+      fee: '10.01',
+      tax: '0',
+    },
+  ];
+  const txns = importer.parse(JSON.stringify(rows));
+  // gross - fee - tax = 100.10 - 10.01 - 0 = 90.09 exactly
+  t.equal(
+    txns[0].netAmount,
+    '90.090000',
+    'pesa gives correct 90.09 (not float 90.08999...)'
+  );
+  t.end();
+});
+
+test('Decimal precision: large amount 123456789.99 preserved without floating-point loss', (t) => {
+  const importer = new PSPExportImporter();
+  const rows = [
+    {
+      id: 'LARGE-1',
+      type: 'payment',
+      date: '2024-01-01',
+      currency: 'SAR',
+      gross: '123456789.99',
+      fee: '0',
+      tax: '0',
+      net: '123456789.99',
+    },
+  ];
+  const txns = importer.parse(JSON.stringify(rows));
+  // net is explicitly provided → returns original source string exactly.
+  t.equal(
+    txns[0].grossAmount,
+    '123456789.99',
+    'large gross preserved as source string'
+  );
+  t.equal(
+    txns[0].netAmount,
+    '123456789.99',
+    'large net preserved as source string'
+  );
+  t.end();
+});
+
+test('Decimal precision: amounts are strings, never JS Numbers', (t) => {
+  const pspImporter = new PSPExportImporter();
+  const pspTxns = pspImporter.parse(JSON.stringify(pspRowsValid));
+  t.equal(typeof pspTxns[0].grossAmount, 'string', 'PSP grossAmount is string');
+  t.equal(typeof pspTxns[0].fees, 'string', 'PSP fees is string');
+  t.equal(typeof pspTxns[0].netAmount, 'string', 'PSP netAmount is string');
+
+  const wooImporter = new WooCommerceImporter();
+  const wooTxns = wooImporter.parse(JSON.stringify(wooOrdersValid));
+  t.equal(
+    typeof wooTxns[0].grossAmount,
+    'string',
+    'WooCommerce grossAmount is string'
+  );
+  t.equal(typeof wooTxns[0].taxes, 'string', 'WooCommerce taxes is string');
+  t.equal(
+    typeof wooTxns[0].netAmount,
+    'string',
+    'WooCommerce netAmount is string'
+  );
+
+  const bankImporter = new BankStatementImporter('SAR');
+  const bankTxns = bankImporter.parse(JSON.stringify(bankRowsValid));
+  t.equal(
+    typeof bankTxns[0].grossAmount,
+    'string',
+    'BankStatement grossAmount is string'
+  );
+  t.equal(
+    typeof bankTxns[1].netAmount,
+    'string',
+    'BankStatement netAmount is string'
+  );
+  t.end();
+});
+
 // ── Idempotency: same raw data yields same hash ──────────────────────────────
 
 test('evidenceHash idempotency: same WooCommerce order parsed twice gives identical hash', (t) => {
@@ -795,8 +1146,6 @@ test('evidenceHash: same sourceId from different sourceTypes produces different 
   t.end();
 });
 
-// ── Source-file hash vs evidence hash distinction ────────────────────────────
-
 test('computeFileHash vs computeEvidenceHash are distinct operations', (t) => {
   const sourceContent = JSON.stringify(wooOrdersValid);
   const fileHash = computeFileHash(sourceContent);
@@ -807,13 +1156,37 @@ test('computeFileHash vs computeEvidenceHash are distinct operations', (t) => {
     sourceId: txns[0].sourceId,
     raw: txns[0].rawData,
   });
-
   t.equal(fileHash.length, 64, 'file hash is SHA-256 hex');
   t.equal(evidenceHash.length, 64, 'evidence hash is SHA-256 hex');
   t.notEqual(
     fileHash,
     evidenceHash,
     'file hash ≠ evidence hash (different inputs)'
+  );
+  t.end();
+});
+
+// ── rawData integrity: no augmentation ───────────────────────────────────────
+
+test('rawData must equal the original source object — no synthetic keys', (t) => {
+  const order = {
+    id: 800,
+    status: 'completed',
+    date_paid: '2024-01-01T00:00:00',
+    currency: 'USD',
+    total: '50.00',
+    total_tax: '5.00',
+    shipping_total: '3.00',
+    discount_total: '2.00',
+  };
+  const importer = new WooCommerceImporter();
+  const txns = importer.parse(JSON.stringify([order]));
+  const rawKeys = Object.keys(txns[0].rawData).sort();
+  const sourceKeys = Object.keys(order).sort();
+  t.deepEqual(
+    rawKeys,
+    sourceKeys,
+    'rawData keys are exactly the source keys — no added synthetic keys'
   );
   t.end();
 });

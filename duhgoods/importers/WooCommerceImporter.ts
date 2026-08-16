@@ -1,10 +1,20 @@
+import { getMoneyMaker } from 'pesa';
 import {
   ImportAdapter,
   ImportedTransaction,
   ImportValidationError,
   SourceType,
-  TransactionType,
 } from './types';
+
+const _pesa = getMoneyMaker({});
+
+interface WooRefund {
+  id: number | string;
+  date_created?: string;
+  amount?: string | number;
+  reason?: string;
+  [key: string]: unknown;
+}
 
 interface WooOrder {
   id: number | string;
@@ -18,16 +28,17 @@ interface WooOrder {
   total_shipping_tax?: string | number;
   payment_method?: string;
   status?: string;
+  refunds?: WooRefund[];
   [key: string]: unknown;
 }
 
 // Statuses that represent a completed, paid order worth importing as a revenue event.
 const PAID_STATUSES: ReadonlySet<string> = new Set(['completed', 'processing']);
 
-// A full refund on an order — the whole order is reversed.
+// A fully-refunded order — import its refunds[], not the order itself.
 const REFUNDED_STATUSES: ReadonlySet<string> = new Set(['refunded']);
 
-// Statuses that produce no importable financial event — skip them cleanly.
+// Statuses that produce no importable financial event — skip cleanly.
 const SKIPPED_STATUSES: ReadonlySet<string> = new Set([
   'pending',
   'on-hold',
@@ -52,7 +63,6 @@ export class WooCommerceImporter implements ImportAdapter {
   }
 
   private _mapOrder(order: WooOrder): ImportedTransaction[] {
-    const errors: string[] = [];
     const sourceId = String(order.id);
     const status = (order.status ?? '').toLowerCase().trim();
 
@@ -74,9 +84,13 @@ export class WooCommerceImporter implements ImportAdapter {
       );
     }
 
-    const transactionType: TransactionType = REFUNDED_STATUSES.has(status)
-      ? 'refund'
-      : 'order';
+    const errors: string[] = [];
+
+    // Currency must come from the source record — no manufactured default.
+    const currencyStr = (order.currency ?? '').trim();
+    if (!currencyStr) {
+      errors.push('currency is missing or blank');
+    }
 
     const dateStr = (order.date_paid ?? order.date_created ?? '').trim();
     if (!dateStr) {
@@ -87,17 +101,19 @@ export class WooCommerceImporter implements ImportAdapter {
       errors.push(`order date is invalid: "${dateStr}"`);
     }
 
-    // Preserve each WooCommerce financial field separately.
-    // Do NOT conflate shipping/discount/tax into a "fees" field —
-    // these are distinct concepts that must be preserved as evidence.
-    const gross = parseFiniteNumber(order.total, 'total', errors);
-    const totalTax = parseFiniteNumber(order.total_tax, 'total_tax', errors);
-    const shippingTotal = parseFiniteNumber(
+    // Decimal strings — validated, source precision preserved.
+    const grossStr = parseDecimalString(order.total, 'total', errors);
+    const totalTaxStr = parseDecimalString(
+      order.total_tax,
+      'total_tax',
+      errors
+    );
+    const shippingTotalStr = parseDecimalString(
       order.shipping_total,
       'shipping_total',
       errors
     );
-    const discountTotal = parseFiniteNumber(
+    const discountTotalStr = parseDecimalString(
       order.discount_total,
       'discount_total',
       errors
@@ -111,42 +127,143 @@ export class WooCommerceImporter implements ImportAdapter {
       );
     }
 
-    // Net revenue = gross - tax. Shipping and discount are preserved in rawData
-    // for downstream reconciliation; they are NOT mixed into fees here because
-    // PSP gateway fees are a separate concept not present in WooCommerce orders.
-    const netAmount = gross - totalTax;
+    const currency = currencyStr.toUpperCase();
+    const refunds: WooRefund[] = Array.isArray(order.refunds)
+      ? order.refunds
+      : [];
 
-    return [
-      {
-        sourceId,
-        sourceType: 'woocommerce',
-        transactionType,
-        transactionDate: transactionDate!,
-        currency: (order.currency ?? 'SAR').toUpperCase(),
-        grossAmount: gross,
-        fees: 0,
-        taxes: totalTax,
-        netAmount,
-        rawData: {
-          ...order,
-          _woo_shipping_total: shippingTotal,
-          _woo_discount_total: discountTotal,
+    if (REFUNDED_STATUSES.has(status)) {
+      // Fully-refunded order: import individual refund records when present,
+      // otherwise synthesise a single full-reversal from order totals.
+      if (refunds.length > 0) {
+        return refunds.map((refund) =>
+          this._mapRefund(refund, order, currency)
+        );
+      }
+      // Synthetic full refund — negate order totals; no rawData mutation.
+      const negGross = negate(grossStr);
+      const negTax = negate(totalTaxStr);
+      const netAmount = _pesa(negGross).sub(_pesa(negTax)).store;
+      return [
+        {
+          sourceId,
+          sourceType: 'woocommerce',
+          transactionType: 'refund',
+          transactionDate: transactionDate!,
+          currency,
+          grossAmount: negGross,
+          fees: '0',
+          taxes: negTax,
+          netAmount,
+          rawData: order as Record<string, unknown>,
+          normalizedMeta: {
+            shippingTotal: shippingTotalStr,
+            discountTotal: discountTotalStr,
+            syntheticFullRefund: true,
+          },
         },
+      ];
+    }
+
+    // PAID order transaction plus any partial refunds recorded in refunds[].
+    const netAmount = _pesa(grossStr).sub(_pesa(totalTaxStr)).store;
+    const orderTxn: ImportedTransaction = {
+      sourceId,
+      sourceType: 'woocommerce',
+      transactionType: 'order',
+      transactionDate: transactionDate!,
+      currency,
+      grossAmount: grossStr,
+      fees: '0',
+      taxes: totalTaxStr,
+      netAmount,
+      rawData: order as Record<string, unknown>,
+      normalizedMeta: {
+        shippingTotal: shippingTotalStr,
+        discountTotal: discountTotalStr,
       },
-    ];
+    };
+
+    const refundTxns = refunds.map((refund) =>
+      this._mapRefund(refund, order, currency)
+    );
+
+    return [orderTxn, ...refundTxns];
+  }
+
+  private _mapRefund(
+    refund: WooRefund,
+    parentOrder: WooOrder,
+    currency: string
+  ): ImportedTransaction {
+    const errors: string[] = [];
+    const refundId = String(refund.id);
+    const parentOrderId = String(parentOrder.id);
+
+    // Prefer refund's own date; fall back to parent order date.
+    const dateStr = (
+      refund.date_created ??
+      parentOrder.date_paid ??
+      parentOrder.date_created ??
+      ''
+    ).trim();
+    if (!dateStr) {
+      errors.push(`refund ${refundId}: date is missing`);
+    }
+    const transactionDate = dateStr ? new Date(dateStr) : null;
+    if (transactionDate !== null && isNaN(transactionDate.getTime())) {
+      errors.push(`refund ${refundId}: date is invalid: "${dateStr}"`);
+    }
+
+    // WooCommerce refund amounts are POSITIVE in the source; negate for convention.
+    const rawAmount = parseDecimalString(refund.amount, 'amount', errors);
+
+    if (errors.length > 0) {
+      throw new ImportValidationError(
+        errors,
+        refundId,
+        refund as Record<string, unknown>
+      );
+    }
+
+    const negAmount = negate(rawAmount);
+
+    return {
+      sourceId: refundId,
+      sourceType: 'woocommerce',
+      transactionType: 'refund',
+      transactionDate: transactionDate!,
+      currency,
+      grossAmount: negAmount,
+      fees: '0',
+      taxes: '0',
+      netAmount: negAmount,
+      rawData: refund as Record<string, unknown>,
+      normalizedMeta: { parentOrderId },
+    };
   }
 }
 
-function parseFiniteNumber(
+/** Returns the additive inverse of a decimal string via pesa arithmetic. */
+function negate(str: string): string {
+  return _pesa('0').sub(_pesa(str)).store;
+}
+
+/**
+ * Validates that `value` is a parseable finite decimal number and returns the
+ * ORIGINAL source string — never a JS Number — to preserve source precision.
+ */
+function parseDecimalString(
   value: unknown,
   field: string,
   errors: string[]
-): number {
-  if (value === undefined || value === null || value === '') return 0;
-  const n = Number(value);
+): string {
+  if (value === undefined || value === null || value === '') return '0';
+  const str = String(value).trim();
+  const n = Number(str);
   if (!isFinite(n)) {
-    errors.push(`${field} is not a valid finite number: ${String(value)}`);
-    return 0;
+    errors.push(`${field} is not a valid finite number: ${str}`);
+    return '0';
   }
-  return n;
+  return str;
 }
