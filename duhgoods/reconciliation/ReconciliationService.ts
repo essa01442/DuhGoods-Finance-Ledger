@@ -94,7 +94,8 @@ export class DuhGoodsReconciliationService {
   async accept(matchName: string, reviewer: string): Promise<void> {
     const match = await this.fyo.doc.getDoc(
       ModelNameEnum.DuhGoodsReconciliationMatch,
-      matchName
+      matchName,
+      { skipDocumentCache: true }
     );
     if (match.status !== 'proposed')
       throw new Error('Only proposed reconciliations can be accepted');
@@ -121,7 +122,17 @@ export class DuhGoodsReconciliationService {
       reviewedAt: new Date(),
       reviewedBy: reviewer,
     });
-    await match.sync();
+    try {
+      await match.sync();
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes('DuhGoods accepted reconciliation conflict')
+      ) {
+        throw new ReconciliationConflictError();
+      }
+      throw error;
+    }
   }
 
   async reject(
@@ -131,7 +142,8 @@ export class DuhGoodsReconciliationService {
   ): Promise<void> {
     const match = await this.fyo.doc.getDoc(
       ModelNameEnum.DuhGoodsReconciliationMatch,
-      matchName
+      matchName,
+      { skipDocumentCache: true }
     );
     if (match.status !== 'proposed')
       throw new Error('Only proposed reconciliations can be rejected');

@@ -98,16 +98,22 @@ test('reconciliation service: persists idempotent proposals and preserves decisi
     'repeated generation creates no duplicate rows'
   );
 
-  await service.accept(
+  const concurrentAccepts = await Promise.allSettled(
     (
       await service.getMatches('proposed')
-    )[0].name as string,
-    'reviewer@example.test'
+    ).map((match) =>
+      service.accept(match.name as string, 'reviewer@example.test')
+    )
+  );
+  t.equal(
+    concurrentAccepts.filter((result) => result.status === 'fulfilled').length,
+    1,
+    'concurrent conflicting accept requests cannot both succeed'
   );
   t.equal(
     (await service.getMatches('accepted')).length,
     1,
-    'a proposed match can be accepted'
+    'exactly one conflicting relationship is accepted'
   );
   t.equal(
     (await service.getUnmatchedRecords()).some(

@@ -98,6 +98,37 @@ test('reconciliation: excludes stale evidence and ineligible pairs', (t) => {
   t.end();
 });
 
+test('reconciliation: excludes an identity whose newest evidence is exception', (t) => {
+  const proposals = generateReconciliationProposals(
+    [
+      record({
+        name: 'order-v1',
+        identityKey: 'woocommerce:W-1',
+        evidenceVersion: 1,
+      }),
+      record({
+        name: 'order-v2-exception',
+        identityKey: 'woocommerce:W-1',
+        evidenceVersion: 2,
+        status: 'exception',
+      }),
+      record({
+        name: 'payment-1',
+        sourceType: 'psp_export',
+        transactionType: 'payment',
+      }),
+    ],
+    pesa
+  );
+
+  t.equal(
+    proposals.length,
+    0,
+    'the exception version suppresses the whole evidence identity'
+  );
+  t.end();
+});
+
 test('reconciliation: high confidence requires a unique close-date candidate', (t) => {
   const proposals = generateReconciliationProposals(
     [
@@ -251,6 +282,52 @@ test('reconciliation: enforces refund, settlement, and chargeback amount directi
       'psp-refund:woo-refund',
     ],
     'each relationship uses its documented economic direction'
+  );
+  t.end();
+});
+
+test('reconciliation: matches PSP refund and chargeback by economic magnitude', (t) => {
+  const proposals = generateReconciliationProposals(
+    [
+      record({
+        name: 'woo-refund',
+        transactionType: 'refund',
+        grossAmount: pesa('-19.99'),
+        netAmount: pesa('-19.99'),
+      }),
+      record({
+        name: 'psp-refund-positive',
+        sourceType: 'psp_export',
+        transactionType: 'refund',
+        grossAmount: pesa('19.99'),
+        netAmount: pesa('19.99'),
+      }),
+      record({
+        name: 'psp-chargeback-positive',
+        sourceType: 'psp_export',
+        transactionType: 'chargeback',
+        grossAmount: pesa('12'),
+        netAmount: pesa('12'),
+      }),
+      record({
+        name: 'bank-debit',
+        sourceType: 'bank_statement',
+        transactionType: 'bank_debit',
+        grossAmount: pesa('12'),
+        netAmount: pesa('-12'),
+      }),
+    ],
+    pesa
+  );
+
+  t.deepEqual(
+    proposals.map((proposal) => proposal.edgeKey),
+    ['bank-debit:psp-chargeback-positive', 'psp-refund-positive:woo-refund'],
+    'positive PSP source signs reconcile using their economic magnitudes'
+  );
+  t.ok(
+    proposals.every((proposal) => proposal.amountDelta.isZero()),
+    'magnitude comparison preserves an exact Money delta'
   );
   t.end();
 });

@@ -71,8 +71,9 @@ type Relationship = {
   days: number;
   leftAmount: 'gross' | 'net';
   rightAmount: 'gross' | 'net';
-  leftDirection: 'positive' | 'negative';
-  rightDirection: 'positive' | 'negative';
+  leftDirection: 'positive' | 'negative' | 'nonzero';
+  rightDirection: 'positive' | 'negative' | 'nonzero';
+  compareMagnitude: boolean;
 };
 
 const RELATIONSHIPS: Relationship[] = [
@@ -86,6 +87,7 @@ const RELATIONSHIPS: Relationship[] = [
     rightAmount: 'gross',
     leftDirection: 'positive',
     rightDirection: 'positive',
+    compareMagnitude: false,
   },
   {
     left: 'refund',
@@ -96,7 +98,8 @@ const RELATIONSHIPS: Relationship[] = [
     leftAmount: 'net',
     rightAmount: 'net',
     leftDirection: 'negative',
-    rightDirection: 'negative',
+    rightDirection: 'nonzero',
+    compareMagnitude: true,
   },
   {
     left: 'settlement',
@@ -108,6 +111,7 @@ const RELATIONSHIPS: Relationship[] = [
     rightAmount: 'net',
     leftDirection: 'positive',
     rightDirection: 'positive',
+    compareMagnitude: false,
   },
   {
     left: 'chargeback',
@@ -117,8 +121,9 @@ const RELATIONSHIPS: Relationship[] = [
     days: RECONCILIATION_WINDOWS_DAYS.chargebackBankDebit,
     leftAmount: 'net',
     rightAmount: 'net',
-    leftDirection: 'negative',
+    leftDirection: 'nonzero',
     rightDirection: 'negative',
+    compareMagnitude: true,
   },
 ];
 
@@ -171,7 +176,7 @@ export function latestValidEvidence(
 ): ReconciliationRecord[] {
   const latest = new Map<string, ReconciliationRecord>();
   for (const record of records) {
-    if (!record.name || record.status === 'exception') continue;
+    if (!record.name) continue;
     const key =
       record.identityKey ??
       `${record.sourceType ?? ''}:${record.sourceId ?? record.name}`;
@@ -183,7 +188,9 @@ export function latestValidEvidence(
       latest.set(key, record);
     }
   }
-  return [...latest.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...latest.values()]
+    .filter((record) => record.status !== 'exception')
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function orderPair(
@@ -235,7 +242,13 @@ function scorePair(
     !hasDirection(rightAmount, relationship.rightDirection)
   )
     return null;
-  const amountDelta = leftAmount.sub(rightAmount);
+  const leftEconomicAmount = relationship.compareMagnitude
+    ? leftAmount.abs()
+    : leftAmount;
+  const rightEconomicAmount = relationship.compareMagnitude
+    ? rightAmount.abs()
+    : rightAmount;
+  const amountDelta = leftEconomicAmount.sub(rightEconomicAmount);
   if (!amountDelta.isZero()) return null;
 
   const reasonCodes: ReconciliationReason[] = [
@@ -256,8 +269,10 @@ function scorePair(
   const [first, second] = [left.name, right.name].sort();
   const firstRecord = left.name === first ? left : right;
   const secondRecord = left.name === first ? right : left;
-  const firstAmount = left.name === first ? leftAmount : rightAmount;
-  const secondAmount = left.name === first ? rightAmount : leftAmount;
+  const firstAmount =
+    left.name === first ? leftEconomicAmount : rightEconomicAmount;
+  const secondAmount =
+    left.name === first ? rightEconomicAmount : leftEconomicAmount;
   const edgeKey = `${first}:${second}`;
   return {
     leftRecord: first,
@@ -345,9 +360,11 @@ function getAmount(
 
 function hasDirection(
   amount: Money,
-  direction: 'positive' | 'negative'
+  direction: 'positive' | 'negative' | 'nonzero'
 ): boolean {
-  return direction === 'positive' ? amount.isPositive() : amount.isNegative();
+  if (direction === 'positive') return amount.isPositive();
+  if (direction === 'negative') return amount.isNegative();
+  return !amount.isZero();
 }
 
 function hasReliableReference(

@@ -11,6 +11,7 @@ import createPaymentMethods from './createPaymentMethods';
 import createDuhGoodsTables from './createDuhGoodsTables';
 import createDuhGoodsEvidenceIndex from './createDuhGoodsEvidenceIndex';
 import createDuhGoodsReconciliationIndex from './createDuhGoodsReconciliationIndex';
+import createDuhGoodsAcceptedReconciliationTrigger from './createDuhGoodsAcceptedReconciliationTrigger';
 
 export default [
   { name: 'testPatch', version: '0.5.0-beta.0', patch: testPatch },
@@ -57,5 +58,10 @@ export default [
     name: 'createDuhGoodsReconciliationIndex',
     version: '0.38.2',
     patch: createDuhGoodsReconciliationIndex,
+  },
+  {
+    name: 'createDuhGoodsAcceptedReconciliationTrigger',
+    version: '0.38.3',
+    patch: createDuhGoodsAcceptedReconciliationTrigger,
   },
 ] as Patch[];
