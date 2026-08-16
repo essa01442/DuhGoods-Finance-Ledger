@@ -251,7 +251,37 @@ async function checkVisibleEnglishGate(window, screenName, t) {
     await checkVisibleEnglishGate(window, 'Desk', t);
   });
 
-  test('9. Close app', async (t) => {
+  test('9. UI Acceptance: General Ledger Screen — Arabic title, RTL, no English leak', async (t) => {
+    await window.evaluate(() => {
+      window.location.hash = '#/report/GeneralLedger';
+    });
+    await window.waitForTimeout(2000);
+
+    const url = window.url();
+    t.ok(
+      url.includes('GeneralLedger') || url.includes('general-ledger'),
+      `General Ledger route open (${url})`
+    );
+
+    const appDir = await window.getAttribute('#app', 'dir');
+    t.equal(appDir, 'rtl', 'General Ledger screen maintains dir="rtl"');
+
+    const pageText = await window.locator('body').innerText();
+    t.ok(
+      pageText.includes('دفتر الأستاذ العام'),
+      'Arabic title "دفتر الأستاذ العام" is visible on General Ledger screen'
+    );
+
+    const englishRegex = /\bGeneral Ledger\b/;
+    t.notOk(
+      englishRegex.test(pageText),
+      'English "General Ledger" must NOT be visible on General Ledger screen'
+    );
+
+    await checkVisibleEnglishGate(window, 'General Ledger', t);
+  });
+
+  test('10. Close app', async (t) => {
     await electronApp.close();
     t.ok(true, 'app closed without errors');
   });
