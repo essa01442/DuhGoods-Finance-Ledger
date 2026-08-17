@@ -15,7 +15,7 @@ export class DuhGoodsFXRate extends Doc {
   effectiveDate?: Date;
   baseCurrency?: string;
   quoteCurrency?: string;
-  rate?: number;
+  rate?: string;
   sourceDescription?: string;
   origin?: string;
   evidenceHash?: string;

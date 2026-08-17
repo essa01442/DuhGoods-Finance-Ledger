@@ -34,8 +34,8 @@
     },
     {
       "fieldname": "rate",
-      "label": "Exchange Rate",
-      "fieldtype": "Float",
+      "label": "Exchange Rate (exact decimal string)",
+      "fieldtype": "Data",
       "required": true,
       "readOnly": true,
       "section": "Default"
