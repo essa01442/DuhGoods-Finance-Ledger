@@ -111,6 +111,74 @@ function getPOSSidebar() {
   };
 }
 
+function getDuhGoodsSidebar(): SidebarRoot {
+  return {
+    label: t`DuhGoods`,
+    name: 'duhgoods',
+    icon: 'accounting',
+    route: '/duhgoods/daily-workflow',
+    items: [
+      {
+        label: t`المعالجة اليومية`,
+        name: 'duhgoods-daily',
+        route: '/duhgoods/daily-workflow',
+      },
+      {
+        label: t`التسوية`,
+        name: 'duhgoods-reconciliation',
+        route: '/duhgoods/reconciliation',
+      },
+      {
+        label: t`الترحيل المحاسبي`,
+        name: 'duhgoods-posting',
+        route: '/duhgoods/accounting-posting',
+      },
+      {
+        label: t`مراجعة ضريبة القيمة المضافة`,
+        name: 'duhgoods-vat',
+        route: '/duhgoods/vat-review',
+      },
+      {
+        label: t`مراجعة أسعار الصرف`,
+        name: 'duhgoods-fx',
+        route: '/duhgoods/fx-review',
+      },
+      {
+        label: t`تقرير التحكم اليومي`,
+        name: 'duhgoods-daily-report',
+        route: '/report/DuhGoodsDailyControl',
+      },
+      {
+        label: t`موقف ضريبة القيمة المضافة`,
+        name: 'duhgoods-vat-report',
+        route: '/report/DuhGoodsVATPosition',
+      },
+      {
+        label: t`أرباح وخسائر العملة الأجنبية`,
+        name: 'duhgoods-fx-report',
+        route: '/report/DuhGoodsFXGains',
+      },
+      {
+        label: t`سجلات الاستيراد`,
+        name: 'duhgoods-import-records',
+        route: '/list/DuhGoodsImportRecord',
+        schemaName: 'DuhGoodsImportRecord',
+      },
+      {
+        label: t`ملفات الاستيراد`,
+        name: 'duhgoods-import-profiles',
+        route: '/list/DuhGoodsImportProfile',
+        schemaName: 'DuhGoodsImportProfile',
+      },
+      {
+        label: t`النسخ الاحتياطي والاستعادة`,
+        name: 'duhgoods-backup',
+        route: '/duhgoods/backup-restore',
+      },
+    ] as SidebarItem[],
+  };
+}
+
 function getReportSidebar() {
   return {
     label: t`Reports`,
@@ -299,6 +367,7 @@ function getCompleteSidebar(): SidebarConfig {
       ] as SidebarItem[],
     },
     getReportSidebar(),
+    getDuhGoodsSidebar(),
     getInventorySidebar(),
     getPOSSidebar(),
     getRegionalSidebar(),

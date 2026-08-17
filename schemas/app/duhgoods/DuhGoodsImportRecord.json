@@ -125,6 +125,61 @@
       "section": "Reconciliation"
     },
     {
+      "fieldname": "vatClassification",
+      "label": "VAT Classification",
+      "fieldtype": "Select",
+      "options": [
+        "taxable",
+        "zero_rated",
+        "exempt",
+        "out_of_scope",
+        "input_vat",
+        "output_vat",
+        "recoverable_vat",
+        "non_recoverable_vat",
+        "review_required",
+        "not_applicable"
+      ],
+      "section": "VAT"
+    },
+    {
+      "fieldname": "vatAmount",
+      "label": "VAT Amount",
+      "fieldtype": "Currency",
+      "section": "VAT"
+    },
+    {
+      "fieldname": "vatReviewNote",
+      "label": "VAT Review Note",
+      "fieldtype": "Text",
+      "section": "VAT"
+    },
+    {
+      "fieldname": "functionalCurrencyAmount",
+      "label": "Functional Currency Amount",
+      "fieldtype": "Currency",
+      "section": "FX"
+    },
+    {
+      "fieldname": "fxRate",
+      "label": "FX Rate Applied",
+      "fieldtype": "Float",
+      "section": "FX"
+    },
+    {
+      "fieldname": "fxRateRef",
+      "label": "FX Rate Record",
+      "fieldtype": "Link",
+      "target": "DuhGoodsFXRate",
+      "section": "FX"
+    },
+    {
+      "fieldname": "fxReviewNote",
+      "label": "FX Review Note",
+      "fieldtype": "Text",
+      "section": "FX"
+    },
+    {
       "fieldname": "rawData",
       "label": "Raw Data (JSON)",
       "fieldtype": "Text",

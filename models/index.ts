@@ -62,6 +62,9 @@ import { DuhGoodsImportSource } from './duhgoods/DuhGoodsImportSource';
 import { DuhGoodsImportRecord } from './duhgoods/DuhGoodsImportRecord';
 import { DuhGoodsReconciliationMatch } from './duhgoods/DuhGoodsReconciliationMatch';
 import { DuhGoodsAccountingPosting } from './duhgoods/DuhGoodsAccountingPosting';
+import { DuhGoodsFXRate } from './duhgoods/DuhGoodsFXRate';
+import { DuhGoodsVATPolicy } from './duhgoods/DuhGoodsVATPolicy';
+import { DuhGoodsImportProfile } from './duhgoods/DuhGoodsImportProfile';
 
 export const models = {
   Account,
@@ -132,6 +135,9 @@ export const models = {
   DuhGoodsImportRecord,
   DuhGoodsReconciliationMatch,
   DuhGoodsAccountingPosting,
+  DuhGoodsFXRate,
+  DuhGoodsVATPolicy,
+  DuhGoodsImportProfile,
 } as ModelMap;
 
 export async function getRegionalModels(

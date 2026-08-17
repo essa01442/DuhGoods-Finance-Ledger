@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { sha256hex } from './sha256';
 
 /**
  * Computes a deterministic SHA-256 hash over a raw data object.
@@ -6,16 +6,14 @@ import { createHash } from 'crypto';
  */
 export function computeEvidenceHash(raw: unknown): string {
   const canonical = stableStringify(raw);
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+  return sha256hex(canonical);
 }
 
 /**
  * Computes a SHA-256 hash over raw bytes (e.g. the original import file).
  */
 export function computeFileHash(content: Buffer | string): string {
-  const buf =
-    typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
-  return createHash('sha256').update(buf).digest('hex');
+  return sha256hex(content);
 }
 
 export interface IdentityKeyOpts {
@@ -53,22 +51,16 @@ export function computeIdentityKey(opts: IdentityKeyOpts): string {
   const NUL = '\x00';
 
   if (externalSourceId) {
-    return createHash('sha256')
-      .update(
-        `${sourceType}${NUL}${sourceNamespace}${NUL}${externalSourceId}`,
-        'utf8'
-      )
-      .digest('hex');
+    return sha256hex(
+      `${sourceType}${NUL}${sourceNamespace}${NUL}${externalSourceId}`
+    );
   }
 
   const fileHash = opts.sourceFileHash ?? '';
   const rowLocator = String(opts.rowLocator ?? 0);
-  return createHash('sha256')
-    .update(
-      `${sourceType}${NUL}${sourceNamespace}${NUL}${fileHash}${NUL}${rowLocator}`,
-      'utf8'
-    )
-    .digest('hex');
+  return sha256hex(
+    `${sourceType}${NUL}${sourceNamespace}${NUL}${fileHash}${NUL}${rowLocator}`
+  );
 }
 
 function stableStringify(value: unknown): string {

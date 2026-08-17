@@ -1,0 +1,74 @@
+{
+  "name": "DuhGoodsImportProfile",
+  "label": "Import Profile",
+  "create": true,
+  "isSingle": false,
+  "isChild": false,
+  "naming": "random",
+  "fields": [
+    {
+      "fieldname": "profileName",
+      "label": "Profile Name",
+      "fieldtype": "Data",
+      "required": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceType",
+      "label": "Source Type",
+      "fieldtype": "Select",
+      "required": true,
+      "options": ["woocommerce", "bank_statement", "psp_export", "fx_rates"],
+      "section": "Default"
+    },
+    {
+      "fieldname": "fileFormat",
+      "label": "File Format",
+      "fieldtype": "Select",
+      "required": true,
+      "options": ["json", "csv"],
+      "default": "json",
+      "section": "Default"
+    },
+    {
+      "fieldname": "defaultSourceNamespace",
+      "label": "Default Source Namespace",
+      "fieldtype": "Data",
+      "section": "Default"
+    },
+    {
+      "fieldname": "defaultCurrency",
+      "label": "Default Currency",
+      "fieldtype": "Link",
+      "target": "Currency",
+      "section": "Default"
+    },
+    {
+      "fieldname": "columnMappings",
+      "label": "Column Mappings (JSON)",
+      "fieldtype": "Text",
+      "section": "Mappings",
+      "description": "JSON object mapping logical field names to source column names/paths"
+    },
+    {
+      "fieldname": "parserOptions",
+      "label": "Parser Options (JSON)",
+      "fieldtype": "Text",
+      "section": "Mappings",
+      "description": "JSON object with format-specific parser options (delimiter, encoding, dateFormat, etc.)"
+    },
+    {
+      "fieldname": "notes",
+      "label": "Notes",
+      "fieldtype": "Text",
+      "section": "Mappings"
+    }
+  ],
+  "quickEditFields": [
+    "profileName",
+    "sourceType",
+    "fileFormat",
+    "defaultSourceNamespace",
+    "defaultCurrency"
+  ]
+}
