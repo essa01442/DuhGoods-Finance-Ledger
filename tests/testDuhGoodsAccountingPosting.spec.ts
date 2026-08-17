@@ -1,5 +1,7 @@
 import test from 'tape';
 import { DuhGoodsAccountingPostingService } from '../duhgoods/accounting/AccountingPostingService';
+import { ImportOrchestrator } from '../duhgoods/importers/ImportOrchestrator';
+import { WooCommerceImporter } from '../duhgoods/importers/WooCommerceImporter';
 import { ModelNameEnum } from 'models/types';
 import type { Money } from 'pesa';
 import { closeTestFyo, getTestFyo, setupTestFyo } from './helpers';
@@ -12,6 +14,7 @@ type RecordOptions = {
   fees?: string;
   taxes?: string;
   rawData?: string;
+  currency?: string;
   identityKey?: string;
   evidenceVersion?: number;
 };
@@ -34,8 +37,9 @@ async function record(
     rowLocator: 1,
     transactionType: type,
     transactionDate: new Date('2026-08-01T00:00:00.000Z'),
-    currency: 'SAR',
-    grossAmount: fyo.pesa(amount), netAmount: fyo.pesa(amount),
+    currency: options.currency ?? 'SAR',
+    grossAmount: fyo.pesa(amount),
+    netAmount: fyo.pesa(amount),
     fees: fyo.pesa(options.fees ?? 0),
     taxes: fyo.pesa(options.taxes ?? 0),
     status: 'pending',
@@ -49,8 +53,18 @@ async function record(
 }
 
 async function fixture(
-  left: { sourceType: string; type: string; amount: string; options?: RecordOptions },
-  right: { sourceType: string; type: string; amount: string; options?: RecordOptions },
+  left: {
+    sourceType: string;
+    type: string;
+    amount: string;
+    options?: RecordOptions;
+  },
+  right: {
+    sourceType: string;
+    type: string;
+    amount: string;
+    options?: RecordOptions;
+  },
   status = 'accepted'
 ) {
   const sourceId = `posting-${++sequence}`;
@@ -123,7 +137,11 @@ async function postingService() {
   });
 }
 
-async function assertBalanced(t: test.Test, postingName: string, message: string) {
+async function assertBalanced(
+  t: test.Test,
+  postingName: string,
+  message: string
+) {
   const posting = await fyo.db.get(
     ModelNameEnum.DuhGoodsAccountingPosting,
     postingName
@@ -150,7 +168,10 @@ test('accounting posting: posts accepted order exactly once and reverses without
       sourceType: 'woocommerce',
       type: 'order',
       amount: '100',
-      options: { taxes: '15', rawData: '{"shippingAmount":10,"discountAmount":5}' },
+      options: {
+        taxes: '15',
+        rawData: '{"shipping_total":10,"discount_total":5}',
+      },
     },
     { sourceType: 'psp_export', type: 'payment', amount: '100' }
   );
@@ -159,17 +180,35 @@ test('accounting posting: posts accepted order exactly once and reverses without
     service.post(match.name!),
     service.post(match.name!),
   ]);
-  t.equal(concurrentName, postingName, 'concurrent posts share one reservation');
-  t.equal(await service.post(match.name!), postingName, 'repeat post is idempotent');
-  const posting = await fyo.doc.getDoc(ModelNameEnum.DuhGoodsAccountingPosting, postingName);
+  t.equal(
+    concurrentName,
+    postingName,
+    'concurrent posts share one reservation'
+  );
+  t.equal(
+    await service.post(match.name!),
+    postingName,
+    'repeat post is idempotent'
+  );
+  const posting = await fyo.doc.getDoc(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    postingName
+  );
   await assertBalanced(t, postingName, 'order');
   const entries = await fyo.db.getAll(ModelNameEnum.AccountingLedgerEntry, {
-    filters: { referenceName: posting.journalEntry as string }, fields: ['name'],
+    filters: { referenceName: posting.journalEntry as string },
+    fields: ['name'],
   });
   t.ok(entries.length > 0, 'submitted JournalEntry creates ledger entries');
   const originalAuditHistory = posting.auditHistory as string;
-  await Promise.all([service.reverse(postingName), service.reverse(postingName)]);
-  const reversed = await fyo.db.get(ModelNameEnum.DuhGoodsAccountingPosting, postingName);
+  await Promise.all([
+    service.reverse(postingName),
+    service.reverse(postingName),
+  ]);
+  const reversed = await fyo.db.get(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    postingName
+  );
   t.equal(reversed.status, 'reversed', 'reversal is retained as state');
   t.ok(
     (reversed.auditHistory as string).startsWith(
@@ -177,7 +216,15 @@ test('accounting posting: posts accepted order exactly once and reverses without
     ),
     'reversal appends to the original audit history'
   );
-  t.ok((await fyo.db.getAll(ModelNameEnum.AccountingLedgerEntry, { filters: { referenceName: posting.journalEntry as string }, fields: ['name'] })).length > entries.length, 'reversal creates offset entries');
+  t.ok(
+    (
+      await fyo.db.getAll(ModelNameEnum.AccountingLedgerEntry, {
+        filters: { referenceName: posting.journalEntry as string },
+        fields: ['name'],
+      })
+    ).length > entries.length,
+    'reversal creates offset entries'
+  );
   t.end();
 });
 
@@ -197,12 +244,20 @@ test('accounting posting: produces balanced refund, settlement, and chargeback J
         amount: '90',
         options: { fees: '7', taxes: '3' },
       },
-      right: { sourceType: 'bank_statement', type: 'bank_credit', amount: '90' },
+      right: {
+        sourceType: 'bank_statement',
+        type: 'bank_credit',
+        amount: '90',
+      },
     },
     {
       label: 'chargeback',
       left: { sourceType: 'psp_export', type: 'chargeback', amount: '-25' },
-      right: { sourceType: 'bank_statement', type: 'bank_debit', amount: '-25' },
+      right: {
+        sourceType: 'bank_statement',
+        type: 'bank_debit',
+        amount: '-25',
+      },
     },
   ];
   for (const scenario of scenarios) {
@@ -261,6 +316,158 @@ test('accounting posting: blocks unaccepted and superseded reconciliation eviden
     fields: ['name'],
   });
   t.equal(journals.length, 0, 'unaccepted reconciliation has no JournalEntry');
+  t.end();
+});
+
+test('accounting posting: uses commercial facts from actual WooCommerce orchestrator evidence', async (t) => {
+  const result = await new ImportOrchestrator(
+    fyo,
+    new WooCommerceImporter()
+  ).import(
+    JSON.stringify([
+      {
+        id: 'woo-commercial-facts',
+        status: 'completed',
+        currency: 'SAR',
+        date_paid: '2026-08-01T00:00:00.000Z',
+        total: '100.125',
+        total_tax: '15.125',
+        shipping_total: '10.25',
+        discount_total: '5.50',
+      },
+    ]),
+    {
+      sourceName: 'Woo commercial facts',
+      sourceNamespace: 'woo:commercial-facts',
+    }
+  );
+  const order = (
+    await fyo.db.getAll(ModelNameEnum.DuhGoodsImportRecord, {
+      filters: { importSource: result.sourceId },
+      fields: ['name', 'evidenceHash'],
+    })
+  )[0];
+  const payment = await record(
+    result.sourceId,
+    'payment',
+    'psp_export',
+    '100.125'
+  );
+  const match = fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsReconciliationMatch);
+  await match.setMultiple({
+    importRecord: order.name,
+    matchType: 'imported_evidence',
+    matchedDocument: payment.name,
+    matchedDocumentType: ModelNameEnum.DuhGoodsImportRecord,
+    leftRecord: order.name,
+    rightRecord: payment.name,
+    edgeKey: [order.name, payment.name].sort().join(':'),
+    confidence: 'exact',
+    status: 'accepted',
+    matchedAt: new Date(),
+    amountDelta: fyo.pesa(0),
+    dateDeltaDays: 0,
+    leftEvidenceHash: order.evidenceHash as string,
+    rightEvidenceHash: payment.evidenceHash as string,
+    evidenceSnapshot: '{}',
+  });
+  await match.sync();
+  const postingName = await (await postingService()).post(match.name!);
+  const posting = await fyo.db.get(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    postingName
+  );
+  const journal = await fyo.doc.getDoc(
+    ModelNameEnum.JournalEntry,
+    posting.journalEntry as string
+  );
+  const credits = (journal.accounts as { credit: Money }[]).map(
+    (line) => line.credit
+  );
+  const hasCredit = (amount: string) =>
+    credits.some((credit) => credit.sub(fyo.pesa(amount)).isZero());
+  t.ok(hasCredit('80.25'), 'sales applies Woo shipping and discount totals');
+  t.ok(hasCredit('15.125'), 'tax precision is preserved');
+  t.ok(hasCredit('10.25'), 'shipping precision is preserved');
+  await assertBalanced(t, postingName, 'Woo importer output');
+  t.end();
+});
+
+test('accounting posting: rejects foreign currency without explicit FX evidence', async (t) => {
+  const { match } = await fixture(
+    {
+      sourceType: 'woocommerce',
+      type: 'order',
+      amount: '999999999999.123456',
+      options: { taxes: '0', currency: 'USD' },
+    },
+    {
+      sourceType: 'psp_export',
+      type: 'payment',
+      amount: '999999999999.123456',
+      options: { currency: 'USD' },
+    }
+  );
+  try {
+    await (await postingService()).post(match.name!);
+    t.fail('foreign currency must not post without FX evidence');
+  } catch (error) {
+    t.equal(
+      (error as Error).message,
+      'Foreign-currency evidence requires explicit FX evidence before posting',
+      'requires_fx exception is explicit'
+    );
+  }
+  t.end();
+});
+
+test('accounting posting: recovers a persisted reservation without duplicate journals', async (t) => {
+  const { match } = await fixture(
+    { sourceType: 'woocommerce', type: 'order', amount: '42.125' },
+    { sourceType: 'psp_export', type: 'payment', amount: '42.125' }
+  );
+  const reservation = fyo.doc.getNewDoc(
+    ModelNameEnum.DuhGoodsAccountingPosting
+  );
+  await reservation.setMultiple({
+    reconciliationMatch: match.name,
+    idempotencyKey: `interrupted:${match.name}`,
+    postingType: 'order_payment',
+    status: 'reserving',
+    evidenceSnapshot: '[]',
+    accountSnapshot: '{}',
+    auditHistory: JSON.stringify([
+      { action: 'reserved', at: new Date().toISOString() },
+    ]),
+  });
+  await reservation.sync();
+  const service = await postingService();
+  const [first, second] = await Promise.all([
+    service.post(match.name!),
+    service.post(match.name!),
+  ]);
+  t.equal(first, second, 'concurrent recovery reuses one reservation');
+  const journals = await fyo.db.getAll(ModelNameEnum.JournalEntry, {
+    filters: { referenceNumber: `DuhGoods:${match.name}` },
+    fields: ['name'],
+  });
+  t.equal(journals.length, 1, 'recovery creates exactly one JournalEntry');
+  await assertBalanced(t, first, 'recovered reservation');
+  const posting = await fyo.doc.getDoc(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    first
+  );
+  await posting.set('auditHistory', '[]');
+  try {
+    await posting.sync();
+    t.fail('reviewed audit history must not be replaceable');
+  } catch (error) {
+    t.equal(
+      (error as Error).message,
+      'DuhGoodsAccountingPosting: audit history may only be appended',
+      'audit history replacement is rejected'
+    );
+  }
   t.end();
 });
 

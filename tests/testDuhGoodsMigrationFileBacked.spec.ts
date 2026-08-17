@@ -122,13 +122,14 @@ test('file-backed: accounting posting migration creates unique constraints and r
   const indexes = await getIndexList(rawDm, 'DuhGoodsAccountingPosting');
   t.ok(
     indexes.some(
-      (index) =>
-        index.name === 'idx_dghap_idempotency' && index.unique === 1
+      (index) => index.name === 'idx_dghap_idempotency' && index.unique === 1
     ),
     'idempotency key has a unique database constraint'
   );
   t.ok(
-    indexes.some((index) => index.name === 'idx_dghap_match' && index.unique === 1),
+    indexes.some(
+      (index) => index.name === 'idx_dghap_match' && index.unique === 1
+    ),
     'reconciliation match has a unique database constraint'
   );
   const trigger = (await rawDm.db!.knex!('sqlite_master')

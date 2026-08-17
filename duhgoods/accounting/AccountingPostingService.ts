@@ -35,17 +35,33 @@ type Line = { account: string; debit: Money; credit: Money };
 
 /** File-driven conversion of accepted reconciliation evidence into Journal Entries. */
 export class DuhGoodsAccountingPostingService {
+  private static readonly postingPromises = new Map<string, Promise<string>>();
+
   constructor(
     private readonly fyo: Fyo,
     private readonly accounts: DuhGoodsAccountMapping
   ) {}
 
   async post(matchName: string): Promise<string> {
+    const active =
+      DuhGoodsAccountingPostingService.postingPromises.get(matchName);
+    if (active) return active;
+    const posting = this.postInternal(matchName);
+    DuhGoodsAccountingPostingService.postingPromises.set(matchName, posting);
+    try {
+      return await posting;
+    } finally {
+      DuhGoodsAccountingPostingService.postingPromises.delete(matchName);
+    }
+  }
+
+  private async postInternal(matchName: string): Promise<string> {
     const existing = await this.findPosting(matchName);
     if (existing) {
       if (existing.status === 'exception')
         throw new Error(existing.exceptionMessage as string);
-      return existing.name as string;
+      if (existing.status === 'posted') return existing.name as string;
+      return this.resume(existing);
     }
 
     const match = await this.fyo.db.get(
@@ -61,6 +77,7 @@ export class DuhGoodsAccountingPostingService {
 
     try {
       const evidence = await this.getCurrentEvidence(match);
+      this.requireFunctionalCurrency(evidence);
       const postingType = relation(evidence);
       const lines = this.buildLines(postingType, evidence);
       const date = latestDate(evidence);
@@ -95,22 +112,33 @@ export class DuhGoodsAccountingPostingService {
         throw error;
       }
 
-      const journal = this.fyo.doc.getNewDoc(ModelNameEnum.JournalEntry);
-      await journal.setMultiple({
-        entryType: 'Journal Entry',
-        date,
-        referenceNumber: `DuhGoods:${matchName}`,
-        referenceDate: date,
-        userRemark: `DuhGoods accepted reconciliation ${matchName}`,
-        accounts: lines.map((line) => ({
-          account: line.account,
-          debit: line.debit,
-          credit: line.credit,
-        })),
-      });
-      await journal.sync();
-      await journal.submit();
-
+      const referenceNumber = `DuhGoods:${matchName}`;
+      let journal = await this.findJournal(referenceNumber);
+      if (!journal) {
+        journal = this.fyo.doc.getNewDoc(ModelNameEnum.JournalEntry);
+        await journal.setMultiple({
+          entryType: 'Journal Entry',
+          date,
+          referenceNumber,
+          referenceDate: date,
+          userRemark: `DuhGoods accepted reconciliation ${matchName}`,
+          accounts: lines.map((line) => ({
+            account: line.account,
+            debit: line.debit,
+            credit: line.credit,
+          })),
+        });
+        try {
+          await journal.sync();
+        } catch (error) {
+          if (!isDuplicateJournal(error)) throw error;
+          journal = await this.findJournal(referenceNumber);
+          if (!journal) throw error;
+        }
+      }
+      await reservation.set('journalEntry', journal.name as string);
+      await reservation.sync();
+      if (!journal.submitted) await journal.submit();
       await reservation.setMultiple({
         status: 'posted',
         journalEntry: journal.name,
@@ -162,10 +190,112 @@ export class DuhGoodsAccountingPostingService {
     return (
       await this.fyo.db.getAll(ModelNameEnum.DuhGoodsAccountingPosting, {
         filters: { reconciliationMatch: matchName },
-        fields: ['name', 'status', 'exceptionMessage'],
+        fields: [
+          'name',
+          'status',
+          'exceptionMessage',
+          'reconciliationMatch',
+          'journalEntry',
+        ],
         limit: 1,
       })
     )[0];
+  }
+  private async resume(posting: Record<string, unknown>): Promise<string> {
+    const journal = posting.journalEntry
+      ? await this.fyo.doc.getDoc(
+          ModelNameEnum.JournalEntry,
+          posting.journalEntry as string
+        )
+      : await this.findJournal(
+          `DuhGoods:${String(posting.reconciliationMatch ?? '')}`
+        );
+    if (!journal) {
+      // The reservation was persisted before any JournalEntry existed; retry safely.
+      const matchName = posting.reconciliationMatch as string;
+      const reservation = await this.fyo.doc.getDoc(
+        ModelNameEnum.DuhGoodsAccountingPosting,
+        posting.name as string,
+        { skipDocumentCache: true }
+      );
+      const match = await this.fyo.db.get(
+        ModelNameEnum.DuhGoodsReconciliationMatch,
+        matchName
+      );
+      const evidence = await this.getCurrentEvidence(match);
+      this.requireFunctionalCurrency(evidence);
+      const postingType = relation(evidence);
+      const lines = this.buildLines(postingType, evidence);
+      const date = latestDate(evidence);
+      if (!date)
+        throw new PostingException(
+          'missing_fact',
+          'Evidence transaction dates are required'
+        );
+      const referenceNumber = `DuhGoods:${matchName}`;
+      const recoveredJournal = this.fyo.doc.getNewDoc(
+        ModelNameEnum.JournalEntry
+      );
+      await recoveredJournal.setMultiple({
+        entryType: 'Journal Entry',
+        date,
+        referenceNumber,
+        referenceDate: date,
+        userRemark: `DuhGoods accepted reconciliation ${matchName}`,
+        accounts: lines,
+      });
+      try {
+        await recoveredJournal.sync();
+      } catch (error) {
+        if (!isDuplicateJournal(error)) throw error;
+        return this.resume(posting);
+      }
+      await reservation.set('journalEntry', recoveredJournal.name as string);
+      await reservation.sync();
+      await recoveredJournal.submit();
+      await reservation.setMultiple({
+        status: 'posted',
+        auditHistory: appendAudit(reservation.auditHistory as string, 'posted'),
+      });
+      await reservation.sync();
+      return reservation.name as string;
+    }
+    if (!journal.submitted) await journal.submit();
+    const reservation = await this.fyo.doc.getDoc(
+      ModelNameEnum.DuhGoodsAccountingPosting,
+      posting.name as string,
+      { skipDocumentCache: true }
+    );
+    await reservation.setMultiple({
+      status: 'posted',
+      journalEntry: journal.name,
+      auditHistory: appendAudit(reservation.auditHistory as string, 'posted'),
+    });
+    await reservation.sync();
+    return reservation.name as string;
+  }
+  private async findJournal(referenceNumber: string) {
+    const rows = await this.fyo.db.getAll(ModelNameEnum.JournalEntry, {
+      filters: { referenceNumber },
+      fields: ['name'],
+      limit: 1,
+    });
+    if (!rows[0]) return;
+    return this.fyo.doc.getDoc(
+      ModelNameEnum.JournalEntry,
+      rows[0].name as string
+    );
+  }
+  private requireFunctionalCurrency(evidence: Evidence[]): void {
+    const functionalCurrency = this.fyo.singles.SystemSettings?.currency;
+    if (
+      !functionalCurrency ||
+      evidence.some((row) => row.currency !== functionalCurrency)
+    )
+      throw new PostingException(
+        'requires_fx',
+        'Foreign-currency evidence requires explicit FX evidence before posting'
+      );
   }
 
   private async exception(
@@ -425,8 +555,8 @@ function parseEvidenceFacts(
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const facts = raw as Record<string, unknown>;
   return {
-    shipping: moneyFact(facts.shippingAmount ?? facts.shipping, fyo),
-    discount: moneyFact(facts.discountAmount ?? facts.discount, fyo),
+    shipping: moneyFact(facts.shipping_total, fyo),
+    discount: moneyFact(facts.discount_total, fyo),
   };
 }
 function moneyFact(value: unknown, fyo: Fyo): Money | undefined {
@@ -478,6 +608,14 @@ function isDuplicatePosting(error: unknown): boolean {
   return (
     error instanceof Error &&
     /UNIQUE constraint failed.*DuhGoodsAccountingPosting/i.test(error.message)
+  );
+}
+function isDuplicateJournal(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /UNIQUE constraint failed.*JournalEntry.referenceNumber/i.test(
+      error.message
+    )
   );
 }
 function isReversalClaimError(error: unknown): boolean {

@@ -6,16 +6,93 @@
   "isChild": false,
   "naming": "autoincrement",
   "fields": [
-    {"fieldname":"reconciliationMatch","label":"Accepted Reconciliation","fieldtype":"Link","target":"DuhGoodsReconciliationMatch","required":true,"readOnly":true,"section":"Default"},
-    {"fieldname":"idempotencyKey","label":"Idempotency Key","fieldtype":"Data","required":true,"readOnly":true,"section":"Default"},
-    {"fieldname":"postingType","label":"Posting Type","fieldtype":"Data","required":true,"readOnly":true,"section":"Default"},
-    {"fieldname":"status","label":"Status","fieldtype":"Select","options":["reserving","posted","reversing","reversed","exception"],"required":true,"readOnly":true,"section":"Default"},
-    {"fieldname":"journalEntry","label":"Journal Entry","fieldtype":"Link","target":"JournalEntry","readOnly":true,"section":"Default"},
-    {"fieldname":"reversalJournalEntry","label":"Reversal Journal Entry","fieldtype":"Link","target":"JournalEntry","readOnly":true,"section":"Default"},
-    {"fieldname":"evidenceSnapshot","label":"Immutable Evidence Snapshot","fieldtype":"Text","required":true,"readOnly":true,"section":"Evidence"},
-    {"fieldname":"accountSnapshot","label":"Explicit Account Mapping Snapshot","fieldtype":"Text","required":true,"readOnly":true,"section":"Evidence"},
-    {"fieldname":"auditHistory","label":"Audit History","fieldtype":"Text","required":true,"readOnly":true,"section":"Evidence"},
-    {"fieldname":"exceptionCode","label":"Exception Code","fieldtype":"Data","readOnly":true,"section":"Exception"},
-    {"fieldname":"exceptionMessage","label":"Exception Message","fieldtype":"Text","readOnly":true,"section":"Exception"}
+    {
+      "fieldname": "reconciliationMatch",
+      "label": "Accepted Reconciliation",
+      "fieldtype": "Link",
+      "target": "DuhGoodsReconciliationMatch",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "idempotencyKey",
+      "label": "Idempotency Key",
+      "fieldtype": "Data",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "postingType",
+      "label": "Posting Type",
+      "fieldtype": "Data",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": ["reserving", "posted", "reversing", "reversed", "exception"],
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "journalEntry",
+      "label": "Journal Entry",
+      "fieldtype": "Link",
+      "target": "JournalEntry",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "reversalJournalEntry",
+      "label": "Reversal Journal Entry",
+      "fieldtype": "Link",
+      "target": "JournalEntry",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "evidenceSnapshot",
+      "label": "Immutable Evidence Snapshot",
+      "fieldtype": "Text",
+      "required": true,
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "accountSnapshot",
+      "label": "Explicit Account Mapping Snapshot",
+      "fieldtype": "Text",
+      "required": true,
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "auditHistory",
+      "label": "Audit History",
+      "fieldtype": "Text",
+      "required": true,
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "exceptionCode",
+      "label": "Exception Code",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Exception"
+    },
+    {
+      "fieldname": "exceptionMessage",
+      "label": "Exception Message",
+      "fieldtype": "Text",
+      "readOnly": true,
+      "section": "Exception"
+    }
   ]
 }

@@ -40,5 +40,22 @@ export class DuhGoodsAccountingPosting extends Doc {
         'DuhGoodsAccountingPosting: a reversal cannot be reopened'
       );
     }
+    const oldHistory = String(stored.auditHistory ?? '');
+    const newHistory = String(this.auditHistory ?? '');
+    if (oldHistory !== newHistory) {
+      const oldEntries: unknown = JSON.parse(oldHistory);
+      const newEntries: unknown = JSON.parse(newHistory);
+      if (
+        !Array.isArray(oldEntries) ||
+        !Array.isArray(newEntries) ||
+        newEntries.length !== oldEntries.length + 1 ||
+        JSON.stringify(newEntries.slice(0, oldEntries.length)) !==
+          JSON.stringify(oldEntries)
+      ) {
+        throw new Error(
+          'DuhGoodsAccountingPosting: audit history may only be appended'
+        );
+      }
+    }
   }
 }
