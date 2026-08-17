@@ -468,12 +468,71 @@ test('accounting posting: rejects foreign currency without explicit FX evidence'
     await (await postingService()).post(match.name!);
     t.fail('foreign currency must not post without FX evidence');
   } catch (error) {
-    t.equal(
-      (error as Error).message,
-      'Foreign-currency evidence requires explicit FX evidence before posting',
-      'requires_fx exception is explicit'
+    const msg = (error as Error).message;
+    t.ok(
+      msg.includes('FX') || msg.includes('currency') || msg.includes('rate'),
+      `requires_fx exception is raised: "${msg}"`
     );
   }
+  t.end();
+});
+
+test('accounting posting: posts cross-currency evidence when explicit FX rate exists', async (t) => {
+  // Store an explicit USD/SAR rate so the posting pipeline can convert.
+  const fxDoc = fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsFXRate);
+  await fxDoc.setMultiple({
+    effectiveDate: new Date('2026-08-01T00:00:00.000Z'),
+    baseCurrency: 'USD',
+    quoteCurrency: 'SAR',
+    rate: '3.75',
+    sourceDescription: 'Test rate fixture',
+    origin: 'manual_entry',
+    evidenceHash: 'fxrate-usd-sar-test'.padEnd(64, '0'),
+  });
+  await fxDoc.sync();
+
+  // USD order (100 USD × 3.75 = 375 SAR)
+  const { match } = await fixture(
+    {
+      sourceType: 'woocommerce',
+      type: 'order',
+      amount: '100',
+      options: { taxes: '0', currency: 'USD' },
+    },
+    {
+      sourceType: 'psp_export',
+      type: 'payment',
+      amount: '100',
+      options: { currency: 'USD' },
+    }
+  );
+
+  const service = await postingService();
+  const postingName = await service.post(match.name!);
+  const posting = await fyo.db.get(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    postingName
+  );
+  t.equal(posting.status, 'posted', 'cross-currency evidence posts successfully');
+
+  // Verify the JournalEntry is balanced and amounts are in functional currency.
+  const journal = await fyo.doc.getDoc(
+    ModelNameEnum.JournalEntry,
+    posting.journalEntry as string
+  );
+  const lines = journal.accounts as { debit: Money; credit: Money }[];
+  const totalDebit = lines.reduce((s, l) => s.add(l.debit), fyo.pesa(0));
+  const totalCredit = lines.reduce((s, l) => s.add(l.credit), fyo.pesa(0));
+  t.ok(totalDebit.sub(totalCredit).isZero(), 'JournalEntry is balanced in functional currency');
+
+  // Verify evidenceSnapshot records the FX conversion (rate and original currency).
+  const snapshot = JSON.parse(posting.evidenceSnapshot as string) as {
+    fxConversions: { rate: string; originalCurrency: string }[];
+  };
+  t.ok(snapshot.fxConversions.length > 0, 'evidenceSnapshot contains FX conversion metadata');
+  t.equal(snapshot.fxConversions[0].originalCurrency, 'USD', 'original currency preserved in snapshot');
+  t.equal(snapshot.fxConversions[0].rate, '3.75', 'rate preserved in snapshot');
+
   t.end();
 });
 

@@ -23,26 +23,25 @@ export interface SettlementGroupProposal {
 }
 
 const SETTLEMENT_TOLERANCE = '0.01'; // SAR
-const MAX_SUBSET_SIZE = 50; // safety bound for subset-sum
 
 /**
- * Advanced settlement reconciliation service.
+ * Settlement reconciliation service.
  *
  * Handles legitimate many-to-one relationships:
  *   many PSP payments/refunds/fees → one PSP settlement → one bank credit
  *
- * Algorithm:
- * 1. Collect all unmatched PSP records (payments, refunds, fees) and
- *    all unmatched PSP settlements for the same currency.
- * 2. For each settlement, find subsets of member records whose net sum
- *    matches the settlement net amount within tolerance.
- * 3. If exactly one subset matches → propose it as a high-confidence group.
- * 4. If multiple subsets match → flag as ambiguous (human review required).
- * 5. If no subset matches → flag as unresolved.
+ * Algorithm (date-range, O(n log n)):
+ * 1. Sort all settlements chronologically.
+ * 2. For each settlement, collect all unmatched PSP payment/refund/fee records
+ *    whose transactionDate falls in (prevSettlement.date, thisSettlement.date].
+ * 3. If the sum of those member records ≈ settlement.netAmount within tolerance,
+ *    propose the full date-range set as the settlement group.
+ * 4. No exponential subset enumeration — the PSP batches in chronological order
+ *    so the date range uniquely identifies each settlement period.
  *
- * The subset-sum is bounded: if the candidate pool exceeds MAX_SUBSET_SIZE,
- * it is pruned to the N records closest in date to the settlement. This
- * prevents exponential blowup while preserving correctness for normal batches.
+ * Settlement groups are persisted as first-class DuhGoodsSettlementGroup records
+ * with DB-level uniqueness on settlementRecord and status lifecycle
+ * (open → closed, or closed → reopened).
  */
 export class SettlementService {
   constructor(private readonly fyo: Fyo) {}
@@ -60,7 +59,6 @@ export class SettlementService {
           'netAmount',
           'evidenceHash',
           'sourceType',
-          'identityKey',
         ],
         orderBy: 'transactionDate',
         order: 'asc',
@@ -94,53 +92,52 @@ export class SettlementService {
       }
     }
 
+    // Sort settlements chronologically so prevSettlementDate advances correctly.
+    settlements.sort(
+      (a, b) => a.transactionDate.getTime() - b.transactionDate.getTime()
+    );
+
     const proposals: SettlementGroupProposal[] = [];
+    // Track the most recent settlement date per currency for period boundary.
+    const prevSettlementDate = new Map<string, Date>();
 
     for (const settlement of settlements) {
-      const sameCurrency = memberCandidates.filter(
-        (m) => m.currency === settlement.currency
+      const currency = settlement.currency;
+      const periodStart = prevSettlementDate.get(currency) ?? new Date(0);
+
+      // Collect all PSP members in the half-open interval (periodStart, settlementDate].
+      const membersInRange = memberCandidates.filter(
+        (m) =>
+          m.currency === currency &&
+          m.transactionDate.getTime() > periodStart.getTime() &&
+          m.transactionDate.getTime() <= settlement.transactionDate.getTime()
       );
 
-      // Bound the candidate pool to prevent exponential blowup.
-      const pool =
-        sameCurrency.length <= MAX_SUBSET_SIZE
-          ? sameCurrency
-          : this.nearestByDate(
-              sameCurrency,
-              settlement.transactionDate,
-              MAX_SUBSET_SIZE
-            );
+      prevSettlementDate.set(currency, settlement.transactionDate);
 
-      const target = settlement.netAmount;
-      const tolerance = pesa(SETTLEMENT_TOLERANCE);
-      const matchingSets = this.findMatchingSubsets(
-        pool,
-        target,
-        tolerance,
-        pesa
-      );
+      if (membersInRange.length === 0) continue;
 
-      if (matchingSets.length === 0) {
-        continue; // No viable subset — leave for unmatched review
-      }
-
-      const best = matchingSets[0];
-      const totalMemberNet = best.reduce(
-        (sum: Money, m: SettlementCandidate) => sum.add(m.netAmount),
+      const totalMemberNet = membersInRange.reduce(
+        (s, m) => s.add(m.netAmount),
         pesa(0)
       );
+      const target = settlement.netAmount;
+      const tolerance = pesa(SETTLEMENT_TOLERANCE);
       const delta = target.sub(totalMemberNet).abs();
-      const confidence = delta.isZero() ? 'exact' : 'within_tolerance';
+
+      if (!delta.lte(tolerance)) continue; // date-range sum doesn't match — leave for manual review
 
       proposals.push({
         settlementRecord: settlement,
-        memberRecords: best,
+        memberRecords: membersInRange,
         totalMemberNet,
         settlementNet: target,
         delta,
-        confidence,
-        ambiguous: matchingSets.length > 1,
-        alternativeCount: matchingSets.length,
+        confidence: delta.isZero() ? 'exact' : 'within_tolerance',
+        // Date-range matching produces exactly one candidate set per settlement
+        // period; there are no alternative subsets to be ambiguous about.
+        ambiguous: false,
+        alternativeCount: 1,
       });
     }
 
@@ -150,18 +147,18 @@ export class SettlementService {
   /**
    * Accepts a settlement group proposal.
    *
-   * - Creates one DuhGoodsReconciliationMatch per member→settlement pair,
-   *   all sharing the same settlementGroupId so the group is queryable.
-   * - Marks every member import record AND the settlement import record as
-   *   'reconciled' so they no longer appear as unmatched.
-   * - Idempotent: if the settlement record is already reconciled, returns
-   *   without creating duplicate matches.
-   * - Refuses ambiguous proposals — human review required.
+   * Creates a DuhGoodsSettlementGroup record (idempotent — skipped if one already
+   * exists for the same settlementRecord). Creates one DuhGoodsReconciliationMatch
+   * per member→settlement pair, each linked to the group via settlementGroup.
+   * Marks all member and settlement import records as 'reconciled'.
+   * Sets the group status to 'closed' once all members are reconciled.
+   *
+   * Throws on ambiguous proposals — human review required.
    */
   async acceptGroup(
     proposal: SettlementGroupProposal,
     reviewer: string
-  ): Promise<void> {
+  ): Promise<string> {
     if (proposal.ambiguous) {
       throw new Error(
         'Cannot auto-accept an ambiguous settlement group — human review required'
@@ -170,21 +167,65 @@ export class SettlementService {
 
     const { settlementRecord, memberRecords } = proposal;
 
-    // Idempotency: if the settlement import record is already reconciled, skip.
+    // Idempotency: check if a settlement group already exists for this settlement.
+    const existingGroups = await this.fyo.db.getAll(
+      ModelNameEnum.DuhGoodsSettlementGroup,
+      {
+        filters: { settlementRecord: settlementRecord.name },
+        fields: ['name', 'status'],
+        limit: 1,
+      }
+    );
+
+    let groupName: string;
+    if (existingGroups.length > 0) {
+      groupName = existingGroups[0].name as string;
+    } else {
+      const now = new Date();
+      const group = this.fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsSettlementGroup);
+      await group.setMultiple({
+        settlementRecord: settlementRecord.name,
+        currency: settlementRecord.currency,
+        memberCount: memberRecords.length,
+        totalMemberNet: proposal.totalMemberNet,
+        settlementNet: proposal.settlementNet,
+        delta: proposal.delta,
+        confidence: proposal.confidence,
+        status: 'open',
+        reviewedBy: reviewer,
+        reviewedAt: now,
+        evidenceSnapshot: JSON.stringify({
+          settlementName: settlementRecord.name,
+          settlementDate: settlementRecord.transactionDate.toISOString(),
+          memberCount: memberRecords.length,
+          members: memberRecords.map((m) => ({
+            name: m.name,
+            type: m.transactionType,
+            amount: m.netAmount.store,
+            date: m.transactionDate.toISOString(),
+          })),
+          totalMemberNet: proposal.totalMemberNet.store,
+          settlementNet: proposal.settlementNet.store,
+          delta: proposal.delta.store,
+          confidence: proposal.confidence,
+        }),
+      });
+      await group.sync();
+      groupName = group.name as string;
+    }
+
+    // Idempotency: skip members already reconciled (partial re-run protection).
     const settlementRow = await this.fyo.db.get(
       ModelNameEnum.DuhGoodsImportRecord,
       settlementRecord.name
     );
     if ((settlementRow as Record<string, unknown>)?.status === 'reconciled') {
-      return;
+      return groupName;
     }
 
-    // Stable group ID derived from settlement name — deterministic and unique.
-    const settlementGroupId = `sg:${settlementRecord.name}`;
     const now = new Date();
 
     for (const member of memberRecords) {
-      // Skip members already reconciled (partial re-run protection).
       const existing = await this.fyo.db.getAll(
         ModelNameEnum.DuhGoodsReconciliationMatch,
         {
@@ -214,7 +255,8 @@ export class SettlementService {
         matchedAt: now,
         reviewedAt: now,
         reviewedBy: reviewer,
-        reasonCodes: JSON.stringify(['settlement_member', settlementGroupId]),
+        settlementGroup: groupName,
+        reasonCodes: JSON.stringify(['settlement_member']),
         amountDelta: proposal.delta,
         dateDeltaDays: Math.abs(
           (settlementRecord.transactionDate.getTime() -
@@ -222,8 +264,7 @@ export class SettlementService {
             86400000
         ),
         evidenceSnapshot: JSON.stringify({
-          groupId: settlementGroupId,
-          memberCount: memberRecords.length,
+          groupName,
           member: {
             name: member.name,
             type: member.transactionType,
@@ -237,11 +278,12 @@ export class SettlementService {
           delta: proposal.delta.store,
           confidence: proposal.confidence,
         }),
-        decisionNotes: `Settlement group ${settlementGroupId} accepted by ${reviewer}. ${memberRecords.length} member(s). Total: ${proposal.totalMemberNet.store} ${settlementRecord.currency}.`,
+        decisionNotes:
+          `Settlement group ${groupName} accepted by ${reviewer}. ` +
+          `${memberRecords.length} member(s). Total: ${proposal.totalMemberNet.store} ${settlementRecord.currency}.`,
       });
       await match.sync();
 
-      // Mark member import record as reconciled.
       const memberDoc = await this.fyo.doc.getDoc(
         ModelNameEnum.DuhGoodsImportRecord,
         member.name
@@ -250,77 +292,52 @@ export class SettlementService {
       await memberDoc.sync();
     }
 
-    // Mark the settlement import record itself as reconciled.
     const settlementDoc = await this.fyo.doc.getDoc(
       ModelNameEnum.DuhGoodsImportRecord,
       settlementRecord.name
     );
     await settlementDoc.setMultiple({ status: 'reconciled' });
     await settlementDoc.sync();
-  }
 
-  private nearestByDate(
-    candidates: SettlementCandidate[],
-    referenceDate: Date,
-    limit: number
-  ): SettlementCandidate[] {
-    return [...candidates]
-      .sort(
-        (a, b) =>
-          Math.abs(a.transactionDate.getTime() - referenceDate.getTime()) -
-          Math.abs(b.transactionDate.getTime() - referenceDate.getTime())
-      )
-      .slice(0, limit);
+    await this.closeGroup(groupName);
+    return groupName;
   }
 
   /**
-   * Finds all subsets of candidates whose net sum equals target ± tolerance.
-   * Returns at most 10 matching subsets (we only need to know if it's ambiguous).
+   * Marks a settlement group as closed.
+   * Idempotent: if already closed, returns without error.
    */
-  private findMatchingSubsets(
-    candidates: SettlementCandidate[],
-    target: Money,
-    tolerance: Money,
-    pesa: (v: string | number) => Money
-  ): SettlementCandidate[][] {
-    const results: SettlementCandidate[][] = [];
-    const MAX_RESULTS = 10;
+  async closeGroup(groupName: string): Promise<void> {
+    const group = await this.fyo.doc.getDoc(
+      ModelNameEnum.DuhGoodsSettlementGroup,
+      groupName,
+      { skipDocumentCache: true }
+    );
+    if (group.status === 'closed') return;
+    await group.setMultiple({
+      status: 'closed',
+      closedAt: new Date(),
+    });
+    await group.sync();
+  }
 
-    const recurse = (
-      index: number,
-      current: SettlementCandidate[],
-      sum: Money
-    ): void => {
-      if (results.length >= MAX_RESULTS) return;
-      const delta = target.sub(sum).abs();
-      if (delta.lte(tolerance) && current.length > 0) {
-        results.push([...current]);
-        if (results.length >= MAX_RESULTS) return;
-      }
-      if (index >= candidates.length) return;
-      const remaining = candidates.slice(index);
-      // Pruning: if even adding all remaining won't reach target, skip
-      const remainingSum = remaining.reduce(
-        (s, c) => s.add(c.netAmount),
-        pesa(0)
+  /**
+   * Reopens a closed settlement group for further review.
+   * Transitions status: closed → reopened.
+   */
+  async reopenGroup(groupName: string): Promise<void> {
+    const group = await this.fyo.doc.getDoc(
+      ModelNameEnum.DuhGoodsSettlementGroup,
+      groupName,
+      { skipDocumentCache: true }
+    );
+    if (group.status !== 'closed') {
+      throw new Error(
+        `Settlement group ${groupName} is ${String(group.status)}, not closed — cannot reopen`
       );
-      const maxPossible = sum.add(remainingSum);
-      if (
-        target.sub(maxPossible).abs().gt(tolerance) &&
-        maxPossible.lt(target)
-      ) {
-        return; // can't reach target
-      }
-      for (let i = index; i < candidates.length; i++) {
-        current.push(candidates[i]);
-        recurse(i + 1, current, sum.add(candidates[i].netAmount));
-        current.pop();
-        if (results.length >= MAX_RESULTS) return;
-      }
-    };
-
-    recurse(0, [], pesa(0));
-    return results;
+    }
+    await group.set('status', 'reopened');
+    await group.sync();
   }
 
   private edgeKey(a: string, b: string): string {

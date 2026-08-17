@@ -1,6 +1,7 @@
 import type { Fyo } from 'fyo';
 import { ModelNameEnum } from 'models/types';
 import type { Money } from 'pesa';
+import { toDecimalString, invertRate } from '../fx/FXService';
 
 export type DuhGoodsAccountMapping = {
   pspClearing: string;
@@ -32,6 +33,15 @@ type Evidence = {
 };
 
 type Line = { account: string; debit: Money; credit: Money };
+
+type FXConversionMeta = {
+  evidenceName: string;
+  originalCurrency: string;
+  functionalCurrency: string;
+  rate: string;
+  rateEvidenceName?: string;
+  transactionDate: string;
+};
 
 /** File-driven conversion of accepted reconciliation evidence into Journal Entries. */
 export class DuhGoodsAccountingPostingService {
@@ -88,16 +98,17 @@ export class DuhGoodsAccountingPostingService {
       );
 
     try {
-      const evidence = await this.getCurrentEvidence(match);
-      this.requireFunctionalCurrency(evidence);
-      const postingType = relation(evidence);
-      const lines = this.buildLines(postingType, evidence);
-      const date = latestDate(evidence);
+      const rawEvidence = await this.getCurrentEvidence(match);
+      const date = latestDate(rawEvidence);
       if (!date)
         throw new PostingException(
           'missing_fact',
           'Evidence transaction dates are required'
         );
+      const { evidence, fxConversions } =
+        await this.convertEvidenceToFunctionalCurrency(rawEvidence, date);
+      const postingType = relation(evidence);
+      const lines = this.buildLines(postingType, evidence);
       const key = `${matchName}:${String(match.leftEvidenceHash)}:${String(
         match.rightEvidenceHash
       )}`;
@@ -109,7 +120,7 @@ export class DuhGoodsAccountingPostingService {
         idempotencyKey: key,
         postingType,
         status: 'reserving',
-        evidenceSnapshot: evidenceSnapshot(evidence),
+        evidenceSnapshot: evidenceSnapshot(rawEvidence, fxConversions),
         accountSnapshot: JSON.stringify(this.accounts),
         auditHistory: JSON.stringify([
           { action: 'reserved', at: new Date().toISOString() },
@@ -242,25 +253,26 @@ export class DuhGoodsAccountingPostingService {
         matchName
       );
       // Re-validate evidence — throws PostingException on superseded / invalid evidence.
-      const evidence = await this.getCurrentEvidence(match);
-      this.requireFunctionalCurrency(evidence);
-      const postingType = relation(evidence);
-      const lines = this.buildLines(postingType, evidence);
-      const date = latestDate(evidence);
-      if (!date)
+      const rawEvidence = await this.getCurrentEvidence(match);
+      const resumeDate = latestDate(rawEvidence);
+      if (!resumeDate)
         throw new PostingException(
           'missing_fact',
           'Evidence transaction dates are required'
         );
+      const { evidence: convertedEvidence } =
+        await this.convertEvidenceToFunctionalCurrency(rawEvidence, resumeDate);
+      const postingType = relation(convertedEvidence);
+      const lines = this.buildLines(postingType, convertedEvidence);
       const referenceNumber = `DuhGoods:${matchName}`;
       const recoveredJournal = this.fyo.doc.getNewDoc(
         ModelNameEnum.JournalEntry
       );
       await recoveredJournal.setMultiple({
         entryType: 'Journal Entry',
-        date,
+        date: resumeDate,
         referenceNumber,
-        referenceDate: date,
+        referenceDate: resumeDate,
         userRemark: `DuhGoods accepted reconciliation ${matchName}`,
         accounts: lines,
       });
@@ -335,16 +347,115 @@ export class DuhGoodsAccountingPostingService {
     );
   }
 
-  private requireFunctionalCurrency(evidence: Evidence[]): void {
+  /**
+   * Converts all evidence to functional currency using explicit FX rates from
+   * DuhGoodsFXRate. Throws PostingException('requires_fx') only when no
+   * explicit rate exists for a foreign-currency evidence row.
+   *
+   * Same-currency evidence passes through unchanged. Amounts are converted
+   * with pesa exact arithmetic — never JS float multiplication.
+   */
+  private async convertEvidenceToFunctionalCurrency(
+    evidence: Evidence[],
+    transactionDate: Date
+  ): Promise<{ evidence: Evidence[]; fxConversions: FXConversionMeta[] }> {
     const functionalCurrency = this.fyo.singles.SystemSettings?.currency;
-    if (
-      !functionalCurrency ||
-      evidence.some((row) => row.currency !== functionalCurrency)
-    )
+    if (!functionalCurrency) {
       throw new PostingException(
         'requires_fx',
-        'Foreign-currency evidence requires explicit FX evidence before posting'
+        'System functional currency is not configured in System Settings'
       );
+    }
+
+    const fxConversions: FXConversionMeta[] = [];
+    const convertedEvidence: Evidence[] = [];
+    const dateStr = transactionDate.toISOString().slice(0, 10);
+
+    for (const row of evidence) {
+      if (!row.currency || row.currency === functionalCurrency) {
+        convertedEvidence.push(row);
+        continue;
+      }
+
+      // Look up direct rate: row.currency → functionalCurrency
+      const directRows = await this.fyo.db.getAll(
+        ModelNameEnum.DuhGoodsFXRate,
+        {
+          filters: {
+            baseCurrency: row.currency,
+            quoteCurrency: functionalCurrency,
+            effectiveDate: ['<=', dateStr],
+          },
+          fields: ['name', 'rate', 'effectiveDate'],
+          orderBy: 'effectiveDate',
+          order: 'desc',
+          limit: 1,
+        }
+      );
+
+      let rateStr: string | null = null;
+      let rateEvidenceName: string | null = null;
+
+      if (directRows.length > 0) {
+        rateStr = toDecimalString(directRows[0].rate);
+        rateEvidenceName = directRows[0].name as string;
+      } else {
+        // Look up inverse rate: functionalCurrency → row.currency, then invert
+        const inverseRows = await this.fyo.db.getAll(
+          ModelNameEnum.DuhGoodsFXRate,
+          {
+            filters: {
+              baseCurrency: functionalCurrency,
+              quoteCurrency: row.currency,
+              effectiveDate: ['<=', dateStr],
+            },
+            fields: ['name', 'rate'],
+            orderBy: 'effectiveDate',
+            order: 'desc',
+            limit: 1,
+          }
+        );
+        if (inverseRows.length > 0) {
+          const stored = toDecimalString(inverseRows[0].rate);
+          if (stored) {
+            rateStr = invertRate(stored);
+            rateEvidenceName = inverseRows[0].name as string;
+          }
+        }
+      }
+
+      if (!rateStr) {
+        throw new PostingException(
+          'requires_fx',
+          `No explicit FX rate for ${row.currency}/${functionalCurrency} on or before ` +
+            `${dateStr}. Add a rate in FX Review before posting.`
+        );
+      }
+
+      const rate = this.fyo.pesa(rateStr);
+      const conv = (m?: Money): Money | undefined =>
+        m ? m.mul(rate) : undefined;
+
+      fxConversions.push({
+        evidenceName: row.name,
+        originalCurrency: row.currency,
+        functionalCurrency,
+        rate: rateStr,
+        rateEvidenceName: rateEvidenceName ?? undefined,
+        transactionDate: dateStr,
+      });
+
+      convertedEvidence.push({
+        ...row,
+        currency: functionalCurrency,
+        grossAmount: conv(row.grossAmount),
+        fees: conv(row.fees),
+        taxes: conv(row.taxes),
+        netAmount: conv(row.netAmount),
+      });
+    }
+
+    return { evidence: convertedEvidence, fxConversions };
   }
 
   private async exception(
@@ -675,9 +786,12 @@ function isReversalClaimError(error: unknown): boolean {
     error.message.includes('DuhGoods accounting reversal already claimed')
   );
 }
-function evidenceSnapshot(evidence: Evidence[]): string {
-  return JSON.stringify(
-    evidence.map((item) => ({
+function evidenceSnapshot(
+  evidence: Evidence[],
+  fxConversions: FXConversionMeta[] = []
+): string {
+  return JSON.stringify({
+    evidence: evidence.map((item) => ({
       name: item.name,
       evidenceHash: item.evidenceHash,
       evidenceVersion: item.evidenceVersion,
@@ -687,6 +801,7 @@ function evidenceSnapshot(evidence: Evidence[]): string {
       fees: item.fees?.store,
       taxes: item.taxes?.store,
       rawData: item.rawData,
-    }))
-  );
+    })),
+    fxConversions,
+  });
 }
