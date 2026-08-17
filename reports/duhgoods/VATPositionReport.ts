@@ -1,4 +1,5 @@
 import { Fyo, t } from 'fyo';
+import { Action } from 'fyo/model/types';
 import { DateTime } from 'luxon';
 import { Report } from 'reports/Report';
 import { ColumnField, ReportData } from 'reports/types';
@@ -24,6 +25,12 @@ export class VATPositionReport extends Report {
 
   constructor(fyo: Fyo) {
     super(fyo);
+  }
+
+  setDefaultFilters(): void {}
+
+  getActions(): Action[] {
+    return [];
   }
 
   getFilters(): Field[] {
