@@ -20,7 +20,14 @@
       "label": "Match Type",
       "fieldtype": "Select",
       "required": true,
-      "options": "journal_entry\npayment\nsales_invoice\npurchase_invoice\nmanual",
+      "options": [
+        "imported_evidence",
+        "journal_entry",
+        "payment",
+        "sales_invoice",
+        "purchase_invoice",
+        "manual"
+      ],
       "readOnly": true,
       "section": "Default"
     },
@@ -39,11 +46,37 @@
       "section": "Default"
     },
     {
+      "fieldname": "leftRecord",
+      "label": "First Evidence Record",
+      "fieldtype": "Link",
+      "target": "DuhGoodsImportRecord",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "rightRecord",
+      "label": "Second Evidence Record",
+      "fieldtype": "Link",
+      "target": "DuhGoodsImportRecord",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "edgeKey",
+      "label": "Reconciliation Edge Key",
+      "fieldtype": "Data",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
       "fieldname": "confidence",
       "label": "Confidence",
       "fieldtype": "Select",
       "required": true,
-      "options": "exact\nhigh\nmedium\nlow",
+      "options": ["exact", "high", "medium", "low"],
       "readOnly": true,
       "section": "Default"
     },
@@ -52,14 +85,28 @@
       "label": "Status",
       "fieldtype": "Select",
       "required": true,
-      "options": "proposed\naccepted\nrejected",
+      "options": ["proposed", "accepted", "rejected", "superseded"],
       "default": "proposed",
       "section": "Default"
     },
     {
       "fieldname": "matchedAt",
-      "label": "Matched At",
+      "label": "Proposed At",
       "fieldtype": "Datetime",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "reviewedAt",
+      "label": "Reviewed At",
+      "fieldtype": "Datetime",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "reviewedBy",
+      "label": "Reviewed By",
+      "fieldtype": "Data",
       "readOnly": true,
       "section": "Default"
     },
@@ -71,18 +118,66 @@
       "section": "Amounts"
     },
     {
+      "fieldname": "dateDeltaDays",
+      "label": "Date Difference (Days)",
+      "fieldtype": "Float",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "reasonCodes",
+      "label": "Matching Reasons",
+      "fieldtype": "Text",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "assessmentHistory",
+      "label": "Proposal Assessment History",
+      "fieldtype": "Text",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "supersededAt",
+      "label": "Superseded At",
+      "fieldtype": "Datetime",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "leftEvidenceHash",
+      "label": "First Evidence Hash",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "rightEvidenceHash",
+      "label": "Second Evidence Hash",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "evidenceSnapshot",
+      "label": "Evidence Snapshot",
+      "fieldtype": "Text",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "decisionNotes",
+      "label": "Decision Notes",
+      "fieldtype": "Text",
+      "section": "Evidence"
+    },
+    {
       "fieldname": "notes",
       "label": "Notes",
       "fieldtype": "Text",
       "section": "Evidence"
     }
   ],
-  "quickEditFields": [
-    "importRecord",
-    "matchType",
-    "matchedDocument",
-    "confidence",
-    "status",
-    "amountDelta"
-  ]
+  "quickEditFields": ["status", "decisionNotes"]
 }

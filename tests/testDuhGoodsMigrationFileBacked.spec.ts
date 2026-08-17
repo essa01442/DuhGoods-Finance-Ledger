@@ -207,6 +207,128 @@ test('file-backed: real SQLite UNIQUE indexes exist on DuhGoodsImportRecord', as
   t.end();
 });
 
+test('file-backed: real SQLite UNIQUE index prevents duplicate reconciliation edges', async (t) => {
+  const knex = rawDm.db!.knex!;
+  const indexes = await getIndexList(rawDm, 'DuhGoodsReconciliationMatch');
+  const edgeIdx = indexes.find((index) => index.name === 'idx_dghrm_edge_key');
+  const unorderedIdx = indexes.find(
+    (index) => index.name === 'idx_dghrm_edge_unordered'
+  );
+  t.equal(Number(edgeIdx?.unique), 1, 'edge key index is UNIQUE');
+  t.equal(Number(unorderedIdx?.unique), 1, 'unordered edge index is UNIQUE');
+
+  const now = new Date().toISOString();
+  await knex('DuhGoodsImportSource').insert({
+    name: 'fb-src-reconciliation',
+    created: now,
+    modified: now,
+    createdBy: '__SYSTEM__',
+    modifiedBy: '__SYSTEM__',
+    sourceName: 'Reconciliation direct-DB source',
+    sourceNamespace: 'bank:FB:RECONCILIATION',
+    sourceType: 'bank_statement',
+    importedAt: now,
+    sourceFile: '',
+    sourceHash: 'r'.repeat(64),
+    recordCount: 2,
+    importedCount: 2,
+    skippedCount: 0,
+    exceptionCount: 0,
+    errorCount: 0,
+    status: 'imported',
+    errorSummary: null,
+  });
+  const baseRecord = {
+    created: now,
+    modified: now,
+    createdBy: '__SYSTEM__',
+    modifiedBy: '__SYSTEM__',
+    importSource: 'fb-src-reconciliation',
+    sourceType: 'bank_statement',
+    sourceNamespace: 'bank:FB:RECONCILIATION',
+    rowLocator: 0,
+    transactionType: 'bank_credit',
+    transactionDate: now,
+    currency: 'SAR',
+    grossAmount: '500',
+    fees: '0',
+    taxes: '0',
+    netAmount: '500',
+    status: 'pending',
+    rawData: '{}',
+    evidenceVersion: 1,
+    priorEvidenceHash: '',
+    notes: null,
+  };
+  await knex('DuhGoodsImportRecord').insert([
+    {
+      ...baseRecord,
+      name: 'fb-match-record-1',
+      sourceId: 'fb-match-record-1',
+      identityKey: 'a'.repeat(64),
+      evidenceHash: 'b'.repeat(64),
+    },
+    {
+      ...baseRecord,
+      name: 'fb-match-record-2',
+      sourceId: 'fb-match-record-2',
+      identityKey: 'c'.repeat(64),
+      evidenceHash: 'd'.repeat(64),
+    },
+  ]);
+  const baseMatch = {
+    name: 'fb-reconciliation-1',
+    created: now,
+    modified: now,
+    createdBy: '__SYSTEM__',
+    modifiedBy: '__SYSTEM__',
+    importRecord: 'fb-match-record-1',
+    matchType: 'imported_evidence',
+    matchedDocument: 'fb-match-record-2',
+    matchedDocumentType: 'DuhGoodsImportRecord',
+    leftRecord: 'fb-match-record-1',
+    rightRecord: 'fb-match-record-2',
+    edgeKey: 'fb-match-record-1:fb-match-record-2',
+    confidence: 'high',
+    status: 'proposed',
+    matchedAt: now,
+    reviewedAt: null,
+    reviewedBy: null,
+    amountDelta: '0',
+    dateDeltaDays: 1,
+    reasonCodes: 'exact_amount',
+    leftEvidenceHash: '1'.repeat(64),
+    rightEvidenceHash: '2'.repeat(64),
+    evidenceSnapshot: '{}',
+    decisionNotes: null,
+    notes: null,
+  };
+  await knex('DuhGoodsReconciliationMatch').insert(baseMatch);
+  t.pass('first reconciliation edge inserted directly');
+
+  let uniqueErr: Error | null = null;
+  try {
+    await knex('DuhGoodsReconciliationMatch').insert({
+      ...baseMatch,
+      name: 'fb-reconciliation-2',
+      importRecord: 'fb-match-record-2',
+      matchedDocument: 'fb-match-record-1',
+      leftRecord: 'fb-match-record-2',
+      rightRecord: 'fb-match-record-1',
+      edgeKey: 'fb-match-record-2:fb-match-record-1',
+    });
+  } catch (err) {
+    uniqueErr = err instanceof Error ? err : new Error(String(err));
+  }
+  t.ok(uniqueErr, 'reversed duplicate edge is rejected by SQLite');
+  t.match(
+    uniqueErr?.message ?? '',
+    /UNIQUE constraint failed/i,
+    'SQLite reports the uniqueness violation'
+  );
+  t.end();
+});
+
 // ---------- direct-DB concurrency test — bypasses beforeSync() ---------------
 
 test('file-backed: SQLite UNIQUE INDEX rejects duplicate evidenceHash without beforeSync()', async (t) => {
@@ -343,6 +465,11 @@ test('file-backed: reopen — all data and indexes survive close+reopen', async 
     name: 'fb-direct-1',
   });
   t.equal(rows.length, 1, 'direct-inserted record survives close+reopen');
+
+  const matches = await rawDm.db!.knex!('DuhGoodsReconciliationMatch').where({
+    name: 'fb-reconciliation-1',
+  });
+  t.equal(matches.length, 1, 'reconciliation state survives close+reopen');
 
   t.end();
 });
