@@ -7,6 +7,7 @@ export type ReconciliationReason =
   | 'exact_amount'
   | 'date_within_window'
   | 'explicit_reference'
+  | 'cross_currency_identity'
   | 'different_currency_requires_fx'
   | 'date_outside_window'
   | 'amount_mismatch'
@@ -148,12 +149,32 @@ export function evaluateReconciliation(
       for (const relationship of RELATIONSHIPS) {
         const ordered = orderPair(left, right, relationship);
         if (!ordered) continue;
-        const outcome = getCurrencyOutcome(ordered[0], ordered[1]);
-        if (outcome) {
-          outcomes.push(outcome);
+        const [leftO, rightO] = ordered;
+
+        // Different currencies: attempt reference-based identity before logging
+        // requires_future_fx. Never compare monetary amounts across currencies.
+        const sameCurrency =
+          !!leftO.currency &&
+          !!rightO.currency &&
+          leftO.currency === rightO.currency;
+
+        if (!sameCurrency) {
+          const crossProposal = scoreCrossCurrencyPair(
+            leftO,
+            rightO,
+            relationship,
+            pesa
+          );
+          if (crossProposal) {
+            proposals.push(crossProposal);
+          } else {
+            const outcome = getCurrencyOutcome(leftO, rightO);
+            if (outcome) outcomes.push(outcome);
+          }
           continue;
         }
-        const proposal = scorePair(ordered[0], ordered[1], relationship, pesa);
+
+        const proposal = scorePair(leftO, rightO, relationship, pesa);
         if (proposal) proposals.push(proposal);
       }
     }
@@ -215,6 +236,10 @@ function orderPair(
   return null;
 }
 
+/**
+ * Scores a same-currency pair for reconciliation.
+ * Returns null when amounts, directions, or date windows don't match.
+ */
 function scorePair(
   left: ReconciliationRecord,
   right: ReconciliationRecord,
@@ -299,6 +324,72 @@ function scorePair(
   };
 }
 
+/**
+ * Scores a cross-currency pair for reconciliation based on shared references.
+ *
+ * Case B in the four-case model: when two records represent the same economic
+ * event but in different currencies (e.g. WooCommerce USD order ↔ PSP SAR
+ * payment), a shared order reference establishes identity WITHOUT comparing
+ * monetary amounts and WITHOUT implying any FX rate.
+ *
+ * Source records are never modified. The match records only the identity
+ * relationship; monetary conversion (if needed for accounting) is handled
+ * separately by FXService.
+ *
+ * Returns null when no reliable reference links the two records.
+ */
+function scoreCrossCurrencyPair(
+  left: ReconciliationRecord,
+  right: ReconciliationRecord,
+  relationship: Relationship,
+  pesa: (value: string | number) => Money
+): ReconciliationProposal | null {
+  if (!hasReliableReference(left, right)) return null;
+  if (!left.transactionDate || !right.transactionDate) return null;
+
+  const dateDeltaDays =
+    Math.abs(left.transactionDate.getTime() - right.transactionDate.getTime()) /
+    86400000;
+  if (dateDeltaDays > relationship.days) return null;
+
+  const reasonCodes: ReconciliationReason[] = [
+    'compatible_transaction_types',
+    'explicit_reference',
+    'cross_currency_identity',
+  ];
+
+  const [first, second] = [left.name, right.name].sort();
+  const firstRecord = left.name === first ? left : right;
+  const secondRecord = left.name === first ? right : left;
+  const edgeKey = `${first}:${second}`;
+
+  return {
+    leftRecord: first,
+    rightRecord: second,
+    matchType: 'imported_evidence',
+    confidence: 'high',
+    reasonCodes,
+    amountDelta: pesa(0),
+    dateDeltaDays,
+    edgeKey,
+    leftEvidenceHash: firstRecord.evidenceHash ?? '',
+    rightEvidenceHash: secondRecord.evidenceHash ?? '',
+    evidenceSnapshot: JSON.stringify({
+      matchKind: 'cross_currency_identity',
+      leftRecord: first,
+      rightRecord: second,
+      leftCurrency: firstRecord.currency,
+      rightCurrency: secondRecord.currency,
+      leftGrossAmount: firstRecord.grossAmount?.store ?? null,
+      rightGrossAmount: secondRecord.grossAmount?.store ?? null,
+      leftEvidenceHash: firstRecord.evidenceHash ?? '',
+      rightEvidenceHash: secondRecord.evidenceHash ?? '',
+      dateDeltaDays,
+      note: 'Cross-currency identity via shared reference; no monetary conversion applied; original amounts preserved',
+    }),
+  };
+}
+
 function applyAmbiguityConfidence(
   proposals: ReconciliationProposal[]
 ): ReconciliationProposal[] {
@@ -366,25 +457,73 @@ function hasDirection(
   return !amount.isZero();
 }
 
+/**
+ * Returns true when two records share a reliable cross-system reference that
+ * establishes identity of the underlying economic event.
+ *
+ * Two matching modes:
+ *
+ *   1. Same-key: both records carry the same named field with the same value.
+ *      e.g. PSP row A has orderId="X" and PSP row B has orderId="X".
+ *
+ *   2. Cross-key: WooCommerce `id` matches a PSP order-reference field.
+ *      e.g. WooCommerce rawData.id = "WOO-001" and PSP rawData.order_id = "WOO-001".
+ *      This is the primary path for WooCommerce order ↔ PSP payment cross-currency
+ *      identity linking.
+ *
+ * No FX rate is implied by a reference match. The match establishes IDENTITY
+ * only — not monetary equivalence.
+ */
 function hasReliableReference(
   left: ReconciliationRecord,
   right: ReconciliationRecord
 ): boolean {
   const leftRaw = parseRaw(left.rawData);
   const rightRaw = parseRaw(right.rawData);
-  const keys = [
+
+  // Mode 1: same named field on both records.
+  const sameKeyRefs = [
     'orderId',
     'order_id',
     'merchantOrderId',
     'paymentReference',
     'transactionReference',
   ];
-  return keys.some(
-    (key) =>
-      leftRaw[key] !== undefined &&
-      rightRaw[key] !== undefined &&
-      String(leftRaw[key]) === String(rightRaw[key])
-  );
+  if (
+    sameKeyRefs.some(
+      (key) =>
+        leftRaw[key] !== undefined &&
+        rightRaw[key] !== undefined &&
+        String(leftRaw[key]) === String(rightRaw[key])
+    )
+  )
+    return true;
+
+  // Mode 2: WooCommerce `id` ↔ PSP order-reference field.
+  const pspRefKeys = ['order_id', 'orderId', 'merchantOrderId'];
+  const leftId =
+    leftRaw.id !== undefined && leftRaw.id !== null ? String(leftRaw.id) : '';
+  const rightId =
+    rightRaw.id !== undefined && rightRaw.id !== null
+      ? String(rightRaw.id)
+      : '';
+
+  for (const refKey of pspRefKeys) {
+    if (
+      leftId &&
+      rightRaw[refKey] !== undefined &&
+      leftId === String(rightRaw[refKey])
+    )
+      return true;
+    if (
+      rightId &&
+      leftRaw[refKey] !== undefined &&
+      rightId === String(leftRaw[refKey])
+    )
+      return true;
+  }
+
+  return false;
 }
 
 function parseRaw(raw?: string): Record<string, unknown> {

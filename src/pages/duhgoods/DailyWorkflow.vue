@@ -138,6 +138,175 @@
         </div>
       </div>
 
+      <!-- Profile Import Section -->
+      <div class="mb-6">
+        <h2 class="text-lg font-semibold mb-3 dark:text-gray-200">
+          {{ t`استيراد بملف تعريفي` }}
+        </h2>
+
+        <div class="p-3 rounded border dark:border-gray-700 dark:bg-gray-800">
+          <div class="flex gap-3 flex-wrap items-end mb-3">
+            <!-- Profile selector -->
+            <div class="flex-1 min-w-48">
+              <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                {{ t`الملف التعريفي` }}
+              </div>
+              <select
+                v-model="selectedProfileName"
+                class="
+                  border
+                  rounded
+                  px-2
+                  py-1
+                  text-sm
+                  w-full
+                  dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200
+                "
+                @change="onProfileChange"
+              >
+                <option value="">{{ t`-- اختر ملفاً تعريفياً --` }}</option>
+                <option
+                  v-for="p in profiles"
+                  :key="String(p.name)"
+                  :value="String(p.name)"
+                >
+                  {{ String(p.profileName || p.name) }}
+                  ({{ String(p.sourceType || '') }},
+                  {{ String(p.fileFormat || '') }})
+                </option>
+              </select>
+            </div>
+
+            <!-- Namespace override -->
+            <div class="flex-1 min-w-40">
+              <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                {{ t`معرف المصدر (اختياري)` }}
+              </div>
+              <input
+                type="text"
+                v-model="profileNamespace"
+                :placeholder="
+                  selectedProfile
+                    ? String(selectedProfile.defaultSourceNamespace || '')
+                    : ''
+                "
+                class="
+                  border
+                  rounded
+                  px-2
+                  py-1
+                  text-sm
+                  w-full
+                  dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200
+                "
+              />
+            </div>
+
+            <!-- File picker -->
+            <div>
+              <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                {{ t`الملف` }}
+              </div>
+              <label
+                class="
+                  cursor-pointer
+                  border
+                  rounded
+                  px-2
+                  py-1
+                  text-sm
+                  bg-white
+                  dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200
+                  hover:bg-gray-50
+                  block
+                "
+              >
+                {{ profileFileName || t`اختر ملف...` }}
+                <input
+                  type="file"
+                  accept=".json,.csv"
+                  class="hidden"
+                  @change="handleProfileFileChange"
+                />
+              </label>
+            </div>
+
+            <!-- Import button -->
+            <Button
+              :label="t`استيراد`"
+              type="primary"
+              :loading="importingProfile"
+              :disabled="!selectedProfileName || !profileFile"
+              @click="runProfileImport"
+            />
+          </div>
+
+          <!-- Profile metadata -->
+          <div
+            v-if="selectedProfile"
+            class="
+              text-xs text-gray-500
+              dark:text-gray-400
+              flex
+              gap-4
+              flex-wrap
+            "
+          >
+            <span
+              >{{ t`المصدر` }}:
+              {{ String(selectedProfile.sourceType || '-') }}</span
+            >
+            <span
+              >{{ t`الصيغة` }}:
+              {{ String(selectedProfile.fileFormat || '-') }}</span
+            >
+            <span v-if="selectedProfile.defaultCurrency">
+              {{ t`العملة` }}: {{ String(selectedProfile.defaultCurrency) }}
+            </span>
+            <span v-if="selectedProfile.defaultSourceNamespace">
+              {{ t`مصدر الاستيراد الافتراضي` }}:
+              {{ String(selectedProfile.defaultSourceNamespace) }}
+            </span>
+          </div>
+
+          <!-- Profile import result -->
+          <div v-if="profileImportResult" class="mt-2 text-xs flex gap-4">
+            <span class="text-green-600"
+              >{{ t`مستورد` }}: {{ profileImportResult.imported }}</span
+            >
+            <span class="text-gray-500"
+              >{{ t`متخطى` }}: {{ profileImportResult.skipped }}</span
+            >
+            <span
+              v-if="profileImportResult.exceptions > 0"
+              class="text-yellow-600"
+              >{{ t`استثناءات` }}: {{ profileImportResult.exceptions }}</span
+            >
+          </div>
+
+          <!-- Profile import errors -->
+          <div
+            v-if="profileImportErrors.length > 0"
+            class="
+              mt-2
+              p-2
+              rounded
+              border border-red-300
+              bg-red-50
+              dark:bg-red-900
+            "
+          >
+            <div
+              v-for="(err, i) in profileImportErrors"
+              :key="i"
+              class="text-sm text-red-600 dark:text-red-400"
+            >
+              {{ err }}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Error list -->
       <div
         v-if="importErrors.length > 0"
@@ -159,13 +328,14 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, computed } from 'vue';
+import { defineComponent, ref, computed, onMounted } from 'vue';
 import { t } from 'fyo';
 import PageHeader from 'src/components/PageHeader.vue';
 import Button from 'src/components/Button.vue';
 import { fyo } from 'src/initFyo';
+import { ModelNameEnum } from 'models/types';
 import { DailyOrchestrator, type DailyControlSummary } from 'duhgoods/daily/DailyOrchestrator';
-import { DuhGoodsReconciliationService } from "duhgoods/reconciliation/ReconciliationService";;
+import { DuhGoodsReconciliationService } from 'duhgoods/reconciliation/ReconciliationService';
 
 const StatCard = defineComponent({
   name: 'StatCard',
@@ -275,6 +445,85 @@ export default defineComponent({
 
     const orchestrator = new DailyOrchestrator(fyo);
 
+    // ── Profile import state ────────────────────────────────────────────────
+    type ProfileRow = {
+      name: unknown;
+      profileName: unknown;
+      sourceType: unknown;
+      fileFormat: unknown;
+      defaultCurrency: unknown;
+      defaultSourceNamespace: unknown;
+    };
+
+    const profiles = ref<ProfileRow[]>([]);
+    const selectedProfileName = ref('');
+    const selectedProfile = computed<ProfileRow | null>(
+      () => profiles.value.find((p) => String(p.name) === selectedProfileName.value) ?? null
+    );
+    const profileFile = ref<{ buffer: Buffer; name: string } | null>(null);
+    const profileFileName = ref('');
+    const profileNamespace = ref('');
+    const importingProfile = ref(false);
+    const profileImportResult = ref<{ imported: number; skipped: number; exceptions: number } | null>(null);
+    const profileImportErrors = ref<string[]>([]);
+
+    const loadProfiles = async () => {
+      try {
+        profiles.value = (await fyo.db.getAll(ModelNameEnum.DuhGoodsImportProfile, {
+          fields: ['name', 'profileName', 'sourceType', 'fileFormat', 'defaultCurrency', 'defaultSourceNamespace'],
+        })) as ProfileRow[];
+      } catch {
+        profiles.value = [];
+      }
+    };
+
+    const onProfileChange = () => {
+      profileImportResult.value = null;
+      profileImportErrors.value = [];
+    };
+
+    const handleProfileFileChange = async (e: Event) => {
+      const input = e.target as HTMLInputElement;
+      const file = input.files?.[0];
+      if (!file) return;
+      profileFileName.value = file.name;
+      const buffer = await file.arrayBuffer();
+      profileFile.value = { buffer: Buffer.from(buffer), name: file.name };
+    };
+
+    const runProfileImport = async () => {
+      if (!selectedProfileName.value || !profileFile.value) return;
+      importingProfile.value = true;
+      profileImportErrors.value = [];
+      profileImportResult.value = null;
+
+      try {
+        const ns = profileNamespace.value.trim() || undefined;
+        const result = await orchestrator.runProfileImport(
+          selectedProfileName.value,
+          profileFile.value.buffer,
+          { sourceNamespace: ns, sourceFile: profileFile.value.name }
+        );
+        profileImportResult.value = {
+          imported: result.imported,
+          skipped: result.skipped,
+          exceptions: result.exceptions,
+        };
+        // Refresh summary to include profile records in the run scope.
+        if (summary.value) {
+          const updatedSources = [...summary.value.importSources, result];
+          const updatedSourceIds = [...summary.value.runSourceIds, result.sourceId];
+          summary.value = await orchestrator.buildSummary(updatedSources, [], null, updatedSourceIds);
+        }
+      } catch (e) {
+        profileImportErrors.value = [e instanceof Error ? e.message : String(e)];
+      } finally {
+        importingProfile.value = false;
+      }
+    };
+
+    onMounted(loadProfiles);
+
     const runImport = async () => {
       importing.value = true;
       importErrors.value = [];
@@ -377,6 +626,19 @@ export default defineComponent({
       hasAnyFile,
       runImport,
       runReconciliation,
+      // Profile import
+      profiles,
+      selectedProfileName,
+      selectedProfile,
+      profileFile,
+      profileFileName,
+      profileNamespace,
+      importingProfile,
+      profileImportResult,
+      profileImportErrors,
+      onProfileChange,
+      handleProfileFileChange,
+      runProfileImport,
       t,
     };
   },
