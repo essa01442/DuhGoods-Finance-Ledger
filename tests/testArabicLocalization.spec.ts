@@ -44,6 +44,9 @@ const ALLOWLIST = new Set([
   'http://localhost:3000',
   'http://',
   'https://',
+  // DuhGoods: Arabic UI strings that legitimately embed untranslatable technical names
+  'ملف WooCommerce',
+  'ملف مزود الدفع (PSP)',
 ]);
 
 // Narrow list of known incorrect lexical/orthographic forms for quality regression check

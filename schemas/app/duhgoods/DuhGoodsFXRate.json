@@ -1,0 +1,90 @@
+{
+  "name": "DuhGoodsFXRate",
+  "label": "FX Rate",
+  "create": false,
+  "isSingle": false,
+  "isChild": false,
+  "naming": "autoincrement",
+  "fields": [
+    {
+      "fieldname": "effectiveDate",
+      "label": "Effective Date",
+      "fieldtype": "Date",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "baseCurrency",
+      "label": "Base Currency",
+      "fieldtype": "Link",
+      "target": "Currency",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "quoteCurrency",
+      "label": "Quote Currency",
+      "fieldtype": "Link",
+      "target": "Currency",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "rate",
+      "label": "Exchange Rate",
+      "fieldtype": "Float",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "sourceDescription",
+      "label": "Source Description",
+      "fieldtype": "Data",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "origin",
+      "label": "Origin",
+      "fieldtype": "Select",
+      "required": true,
+      "options": ["imported_file", "manual_entry"],
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "evidenceHash",
+      "label": "Evidence Hash (SHA-256)",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "importSource",
+      "label": "Import Source",
+      "fieldtype": "Link",
+      "target": "DuhGoodsImportSource",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "notes",
+      "label": "Notes",
+      "fieldtype": "Text",
+      "section": "Evidence"
+    }
+  ],
+  "quickEditFields": [
+    "effectiveDate",
+    "baseCurrency",
+    "quoteCurrency",
+    "rate",
+    "sourceDescription",
+    "origin"
+  ]
+}

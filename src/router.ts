@@ -12,6 +12,12 @@ import Settings from 'src/pages/Settings/Settings.vue';
 import TemplateBuilder from 'src/pages/TemplateBuilder/TemplateBuilder.vue';
 import CustomizeForm from 'src/pages/CustomizeForm/CustomizeForm.vue';
 import POS from 'src/pages/POS/POS.vue';
+import DailyWorkflow from 'src/pages/duhgoods/DailyWorkflow.vue';
+import ReconciliationReview from 'src/pages/duhgoods/ReconciliationReview.vue';
+import AccountingPostingDashboard from 'src/pages/duhgoods/AccountingPostingDashboard.vue';
+import VATReview from 'src/pages/duhgoods/VATReview.vue';
+import FXReview from 'src/pages/duhgoods/FXReview.vue';
+import BackupRestore from 'src/pages/duhgoods/BackupRestore.vue';
 import type { HistoryState } from 'vue-router';
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
 import { historyState } from './utils/refs';
@@ -136,6 +142,36 @@ const routes: RouteRecordRaw[] = [
       default: true,
       edit: (route) => route.query,
     },
+  },
+  {
+    path: '/duhgoods/daily-workflow',
+    name: 'DailyWorkflow',
+    component: DailyWorkflow,
+  },
+  {
+    path: '/duhgoods/reconciliation',
+    name: 'ReconciliationReview',
+    component: ReconciliationReview,
+  },
+  {
+    path: '/duhgoods/accounting-posting',
+    name: 'AccountingPostingDashboard',
+    component: AccountingPostingDashboard,
+  },
+  {
+    path: '/duhgoods/vat-review',
+    name: 'VATReview',
+    component: VATReview,
+  },
+  {
+    path: '/duhgoods/fx-review',
+    name: 'FXReview',
+    component: FXReview,
+  },
+  {
+    path: '/duhgoods/backup-restore',
+    name: 'BackupRestore',
+    component: BackupRestore,
   },
 ];
 

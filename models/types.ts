@@ -87,6 +87,9 @@ export enum ModelNameEnum {
   DuhGoodsImportRecord = 'DuhGoodsImportRecord',
   DuhGoodsReconciliationMatch = 'DuhGoodsReconciliationMatch',
   DuhGoodsAccountingPosting = 'DuhGoodsAccountingPosting',
+  DuhGoodsFXRate = 'DuhGoodsFXRate',
+  DuhGoodsVATPolicy = 'DuhGoodsVATPolicy',
+  DuhGoodsImportProfile = 'DuhGoodsImportProfile',
 }
 
 export type ModelName = keyof typeof ModelNameEnum;

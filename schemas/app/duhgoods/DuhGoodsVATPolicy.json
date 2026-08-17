@@ -1,0 +1,96 @@
+{
+  "name": "DuhGoodsVATPolicy",
+  "label": "VAT Policy",
+  "create": false,
+  "isSingle": true,
+  "isChild": false,
+  "naming": "random",
+  "fields": [
+    {
+      "fieldname": "enabled",
+      "label": "VAT Enabled",
+      "fieldtype": "Check",
+      "default": 1,
+      "section": "Default"
+    },
+    {
+      "fieldname": "standardRate",
+      "label": "Standard VAT Rate (%)",
+      "fieldtype": "Float",
+      "default": 15,
+      "section": "Default"
+    },
+    {
+      "fieldname": "functionalCurrency",
+      "label": "Functional Currency",
+      "fieldtype": "Link",
+      "target": "Currency",
+      "required": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "defaultSalesClassification",
+      "label": "Default Sales Classification",
+      "fieldtype": "Select",
+      "options": [
+        "taxable",
+        "zero_rated",
+        "exempt",
+        "out_of_scope",
+        "review_required"
+      ],
+      "default": "taxable",
+      "section": "Classifications"
+    },
+    {
+      "fieldname": "defaultFeeClassification",
+      "label": "Default Fee Classification",
+      "fieldtype": "Select",
+      "options": [
+        "taxable",
+        "zero_rated",
+        "exempt",
+        "out_of_scope",
+        "input_vat",
+        "non_recoverable_vat",
+        "review_required"
+      ],
+      "default": "input_vat",
+      "section": "Classifications"
+    },
+    {
+      "fieldname": "defaultShippingClassification",
+      "label": "Default Shipping Classification",
+      "fieldtype": "Select",
+      "options": [
+        "taxable",
+        "zero_rated",
+        "exempt",
+        "out_of_scope",
+        "review_required"
+      ],
+      "default": "taxable",
+      "section": "Classifications"
+    },
+    {
+      "fieldname": "vatRegistrationNumber",
+      "label": "VAT Registration Number",
+      "fieldtype": "Data",
+      "section": "Registration"
+    },
+    {
+      "fieldname": "vatPeriodType",
+      "label": "VAT Period",
+      "fieldtype": "Select",
+      "options": ["monthly", "quarterly"],
+      "default": "quarterly",
+      "section": "Registration"
+    },
+    {
+      "fieldname": "notes",
+      "label": "Notes",
+      "fieldtype": "Text",
+      "section": "Registration"
+    }
+  ]
+}

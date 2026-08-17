@@ -13,6 +13,8 @@ import createDuhGoodsEvidenceIndex from './createDuhGoodsEvidenceIndex';
 import createDuhGoodsReconciliationIndex from './createDuhGoodsReconciliationIndex';
 import createDuhGoodsAcceptedReconciliationTrigger from './createDuhGoodsAcceptedReconciliationTrigger';
 import createDuhGoodsAccountingPostingIndex from './createDuhGoodsAccountingPostingIndex';
+import createDuhGoodsFXRateTable from './createDuhGoodsFXRateTable';
+import createDuhGoodsAuxTables from './createDuhGoodsAuxTables';
 
 export default [
   { name: 'testPatch', version: '0.5.0-beta.0', patch: testPatch },
@@ -69,5 +71,15 @@ export default [
     name: 'createDuhGoodsAccountingPostingIndex',
     version: '0.38.4',
     patch: createDuhGoodsAccountingPostingIndex,
+  },
+  {
+    name: 'createDuhGoodsFXRateTable',
+    version: '0.38.5',
+    patch: createDuhGoodsFXRateTable,
+  },
+  {
+    name: 'createDuhGoodsAuxTables',
+    version: '0.38.6',
+    patch: createDuhGoodsAuxTables,
   },
 ] as Patch[];
