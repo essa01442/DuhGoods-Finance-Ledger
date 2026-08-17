@@ -33,3 +33,15 @@ jobs:
 
       - name: Check Formatting
         run: yarn prettier --check .
+
+      - name: Type check DuhGoods (vue-tsc)
+        run: |
+          set +e
+          yarn vue-tsc --noEmit > vue-tsc.log 2>&1
+          set -e
+          cat vue-tsc.log
+          if grep -E "^(duhgoods/|reports/duhgoods/)" vue-tsc.log; then
+            echo "vue-tsc reported errors in duhgoods/ or reports/duhgoods/ — see above."
+            exit 1
+          fi
+          echo "No type errors in duhgoods/ or reports/duhgoods/."
