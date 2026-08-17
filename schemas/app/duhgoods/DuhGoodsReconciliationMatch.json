@@ -173,6 +173,14 @@
       "section": "Evidence"
     },
     {
+      "fieldname": "settlementGroup",
+      "label": "Settlement Group",
+      "fieldtype": "Link",
+      "target": "DuhGoodsSettlementGroup",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
       "fieldname": "notes",
       "label": "Notes",
       "fieldtype": "Text",

@@ -1,0 +1,106 @@
+{
+  "name": "DuhGoodsSettlementGroup",
+  "label": "Settlement Group",
+  "create": false,
+  "isSingle": false,
+  "isChild": false,
+  "naming": "autoincrement",
+  "fields": [
+    {
+      "fieldname": "settlementRecord",
+      "label": "Settlement Record",
+      "fieldtype": "Link",
+      "target": "DuhGoodsImportRecord",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "currency",
+      "label": "Currency",
+      "fieldtype": "Data",
+      "required": true,
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "memberCount",
+      "label": "Member Count",
+      "fieldtype": "Int",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "totalMemberNet",
+      "label": "Total Member Net",
+      "fieldtype": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "settlementNet",
+      "label": "Settlement Net",
+      "fieldtype": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "delta",
+      "label": "Amount Delta",
+      "fieldtype": "Currency",
+      "readOnly": true,
+      "section": "Amounts"
+    },
+    {
+      "fieldname": "confidence",
+      "label": "Confidence",
+      "fieldtype": "Select",
+      "options": ["exact", "within_tolerance"],
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": ["open", "closed", "reopened"],
+      "default": "open",
+      "section": "Default"
+    },
+    {
+      "fieldname": "reviewedBy",
+      "label": "Reviewed By",
+      "fieldtype": "Data",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "reviewedAt",
+      "label": "Reviewed At",
+      "fieldtype": "Datetime",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "closedAt",
+      "label": "Closed At",
+      "fieldtype": "Datetime",
+      "readOnly": true,
+      "section": "Default"
+    },
+    {
+      "fieldname": "evidenceSnapshot",
+      "label": "Evidence Snapshot",
+      "fieldtype": "Text",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "notes",
+      "label": "Notes",
+      "fieldtype": "Text",
+      "section": "Evidence"
+    }
+  ],
+  "quickEditFields": ["status", "notes"]
+}

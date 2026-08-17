@@ -91,6 +91,7 @@ import DuhGoodsAccountingPosting from './app/duhgoods/DuhGoodsAccountingPosting.
 import DuhGoodsFXRate from './app/duhgoods/DuhGoodsFXRate.json';
 import DuhGoodsVATPolicy from './app/duhgoods/DuhGoodsVATPolicy.json';
 import DuhGoodsImportProfile from './app/duhgoods/DuhGoodsImportProfile.json';
+import DuhGoodsSettlementGroup from './app/duhgoods/DuhGoodsSettlementGroup.json';
 
 export const coreSchemas: Schema[] = [
   PatchRun as Schema,
@@ -212,4 +213,5 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   DuhGoodsFXRate as Schema,
   DuhGoodsVATPolicy as Schema,
   DuhGoodsImportProfile as Schema,
+  DuhGoodsSettlementGroup as Schema,
 ];

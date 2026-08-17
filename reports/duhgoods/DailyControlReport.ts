@@ -31,11 +31,11 @@ export class DailyControlReport extends Report {
     super(fyo);
   }
 
-  async getFilters(): Promise<Field[]> {
+  getFilters(): Field[] {
     return [];
   }
 
-  async getColumns(): Promise<ColumnField[]> {
+  getColumns(): ColumnField[] {
     return [
       {
         fieldname: 'label',
@@ -85,20 +85,27 @@ export class DailyControlReport extends Report {
     const pending = records.filter((r) => r.status === 'pending').length;
     const reconciled = records.filter((r) => r.status === 'reconciled').length;
     const unmatched = records.filter((r) => r.status === 'unmatched').length;
-    const evidenceExceptions = records.filter((r) => r.status === 'exception').length;
+    const evidenceExceptions = records.filter(
+      (r) => r.status === 'exception'
+    ).length;
 
     const proposed = matches.filter((m) => m.status === 'proposed').length;
     const accepted = matches.filter((m) => m.status === 'accepted').length;
     const rejected = matches.filter((m) => m.status === 'rejected').length;
     const ambiguous = matches.filter(
-      (m) => m.status === 'proposed' && (m.confidence === 'medium' || m.confidence === 'low')
+      (m) =>
+        m.status === 'proposed' &&
+        (m.confidence === 'medium' || m.confidence === 'low')
     ).length;
 
     const posted = postings.filter((p) => p.status === 'posted').length;
-    const postingExceptions = postings.filter((p) => p.status === 'exception').length;
+    const postingExceptions = postings.filter(
+      (p) => p.status === 'exception'
+    ).length;
 
     const vatExceptions = records.filter(
-      (r) => (r as Record<string, unknown>).vatClassification === 'review_required'
+      (r) =>
+        (r as Record<string, unknown>).vatClassification === 'review_required'
     ).length;
 
     const fxExceptions = records.filter(
@@ -107,20 +114,38 @@ export class DailyControlReport extends Report {
 
     const importSources = await this.fyo.db.getAll(
       ModelNameEnum.DuhGoodsImportSource,
-      { fields: ['name', 'status', 'importedCount', 'skippedCount', 'exceptionCount'] }
+      {
+        fields: [
+          'name',
+          'status',
+          'importedCount',
+          'skippedCount',
+          'exceptionCount',
+        ],
+      }
     );
 
     const rows: ControlRow[] = [
       { label: t`═══ مصادر الاستيراد ═══`, value: '', highlight: false },
-      { label: t`دفعات الاستيراد`, value: importSources.length, highlight: false },
+      {
+        label: t`دفعات الاستيراد`,
+        value: importSources.length,
+        highlight: false,
+      },
       {
         label: t`السجلات المستوردة`,
-        value: importSources.reduce((s, r) => s + ((r.importedCount as number) ?? 0), 0),
+        value: importSources.reduce(
+          (s, r) => s + ((r.importedCount as number) ?? 0),
+          0
+        ),
         highlight: false,
       },
       {
         label: t`السجلات المتخطاة (مكررة)`,
-        value: importSources.reduce((s, r) => s + ((r.skippedCount as number) ?? 0), 0),
+        value: importSources.reduce(
+          (s, r) => s + ((r.skippedCount as number) ?? 0),
+          0
+        ),
         highlight: false,
       },
       { label: '', value: '', highlight: false },
@@ -129,24 +154,54 @@ export class DailyControlReport extends Report {
       { label: t`في انتظار المطابقة`, value: pending, highlight: pending > 0 },
       { label: t`تمت المطابقة`, value: reconciled, highlight: false },
       { label: t`غير مطابقة`, value: unmatched, highlight: unmatched > 0 },
-      { label: t`استثناءات الأدلة`, value: evidenceExceptions, highlight: evidenceExceptions > 0 },
+      {
+        label: t`استثناءات الأدلة`,
+        value: evidenceExceptions,
+        highlight: evidenceExceptions > 0,
+      },
       { label: '', value: '', highlight: false },
       { label: t`═══ التسوية ═══`, value: '', highlight: false },
       { label: t`مقترحات مطابقة`, value: proposed, highlight: false },
       { label: t`مطابقات مقبولة`, value: accepted, highlight: false },
       { label: t`مطابقات مرفوضة`, value: rejected, highlight: false },
-      { label: t`مطابقات غامضة (تحتاج مراجعة)`, value: ambiguous, highlight: ambiguous > 0 },
+      {
+        label: t`مطابقات غامضة (تحتاج مراجعة)`,
+        value: ambiguous,
+        highlight: ambiguous > 0,
+      },
       { label: '', value: '', highlight: false },
       { label: t`═══ الترحيل المحاسبي ═══`, value: '', highlight: false },
       { label: t`قيود محاسبية مرحّلة`, value: posted, highlight: false },
-      { label: t`استثناءات الترحيل`, value: postingExceptions, highlight: postingExceptions > 0 },
+      {
+        label: t`استثناءات الترحيل`,
+        value: postingExceptions,
+        highlight: postingExceptions > 0,
+      },
       { label: '', value: '', highlight: false },
-      { label: t`═══ ضريبة القيمة المضافة وأسعار الصرف ═══`, value: '', highlight: false },
-      { label: t`استثناءات ضريبة القيمة المضافة`, value: vatExceptions, highlight: vatExceptions > 0 },
-      { label: t`استثناءات سعر الصرف`, value: fxExceptions, highlight: fxExceptions > 0 },
+      {
+        label: t`═══ ضريبة القيمة المضافة وأسعار الصرف ═══`,
+        value: '',
+        highlight: false,
+      },
+      {
+        label: t`استثناءات ضريبة القيمة المضافة`,
+        value: vatExceptions,
+        highlight: vatExceptions > 0,
+      },
+      {
+        label: t`استثناءات سعر الصرف`,
+        value: fxExceptions,
+        highlight: fxExceptions > 0,
+      },
     ];
 
-    const openCount = ambiguous + unmatched + postingExceptions + vatExceptions + fxExceptions + evidenceExceptions;
+    const openCount =
+      ambiguous +
+      unmatched +
+      postingExceptions +
+      vatExceptions +
+      fxExceptions +
+      evidenceExceptions;
     rows.push({ label: '', value: '', highlight: false });
     if (openCount === 0) {
       rows.push({ label: t`اليوم متوازن ✓`, value: t`نعم`, highlight: false });

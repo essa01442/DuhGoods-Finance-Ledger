@@ -121,7 +121,10 @@ test('FXService: storeManualRate - rejects zero/negative rate', async (t) => {
     });
     t.fail('should have thrown');
   } catch (e) {
-    t.ok(e instanceof Error && e.message.includes('positive'), 'rejects zero rate');
+    t.ok(
+      e instanceof Error && e.message.includes('positive'),
+      'rejects zero rate'
+    );
   }
   t.end();
 });
@@ -150,20 +153,23 @@ test('FXService: findRate - uses most recent rate on or before date', async (t) 
 });
 
 test('FXService: findRate - inverse pair lookup', async (t) => {
+  // Use JPY/SAR — never stored directly in any other test, so the inverse
+  // lookup must be used.  Store SAR/JPY, then look up JPY/SAR.
   const svc = new FXService(fyo);
   await svc.storeManualRate({
     effectiveDate: new Date('2026-07-20T00:00:00.000Z'),
     baseCurrency: 'SAR',
-    quoteCurrency: 'USD',
-    rate: 0.2667,
-    sourceDescription: 'SAR/USD inverse test',
+    quoteCurrency: 'JPY',
+    rate: '28.1',
+    sourceDescription: 'SAR/JPY inverse test',
   });
-  const result = await svc.findRate('USD', 'SAR', new Date('2026-07-20'));
+  const result = await svc.findRate('JPY', 'SAR', new Date('2026-07-20'));
   t.ok(result, 'found via inverse pair');
   t.ok(result!.derived, 'inverse rate marked as derived');
+  // 1 / 28.1 ≈ 0.03558...
   t.ok(
-    result!.rate.startsWith('3.74') || result!.rate.startsWith('3.75'),
-    `inverse rate is exact decimal near 3.75 (1/0.2667), got ${result!.rate}`
+    result!.rate.startsWith('0.035'),
+    `inverse rate is exact decimal ~0.03558 (1/28.1), got ${result!.rate}`
   );
   t.end();
 });
@@ -183,9 +189,16 @@ test('FXService: convert - returns FXConversionResult when rate available', asyn
     'SAR',
     new Date('2026-07-05')
   );
-  t.ok(!svc.isMissingRateException(result), 'result is conversion, not exception');
+  t.ok(
+    !svc.isMissingRateException(result),
+    'result is conversion, not exception'
+  );
   if (!svc.isMissingRateException(result)) {
-    t.equal(result.functionalAmount.store, fyo.pesa('375').store, '100 USD = 375 SAR');
+    t.equal(
+      result.functionalAmount.store,
+      fyo.pesa('375').store,
+      '100 USD = 375 SAR'
+    );
   }
   t.end();
 });
@@ -237,8 +250,20 @@ test('FXService: applyToRecord - sets fxReviewNote when rate missing', async (t)
 test('FXService: importFromJSON - imports multiple rates idempotently', async (t) => {
   const svc = new FXService(fyo);
   const content = JSON.stringify([
-    { date: '2026-06-01', base: 'USD', quote: 'SAR', rate: 3.75, source: 'June import' },
-    { date: '2026-06-02', base: 'USD', quote: 'SAR', rate: 3.76, source: 'June import' },
+    {
+      date: '2026-06-01',
+      base: 'USD',
+      quote: 'SAR',
+      rate: 3.75,
+      source: 'June import',
+    },
+    {
+      date: '2026-06-02',
+      base: 'USD',
+      quote: 'SAR',
+      rate: 3.76,
+      source: 'June import',
+    },
   ]);
   const r1 = await svc.importFromJSON(content);
   t.equal(r1.imported, 2, 'imported 2 rates');

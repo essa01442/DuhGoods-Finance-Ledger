@@ -65,6 +65,7 @@ import { DuhGoodsAccountingPosting } from './duhgoods/DuhGoodsAccountingPosting'
 import { DuhGoodsFXRate } from './duhgoods/DuhGoodsFXRate';
 import { DuhGoodsVATPolicy } from './duhgoods/DuhGoodsVATPolicy';
 import { DuhGoodsImportProfile } from './duhgoods/DuhGoodsImportProfile';
+import { DuhGoodsSettlementGroup } from './duhgoods/DuhGoodsSettlementGroup';
 
 export const models = {
   Account,
@@ -138,6 +139,7 @@ export const models = {
   DuhGoodsFXRate,
   DuhGoodsVATPolicy,
   DuhGoodsImportProfile,
+  DuhGoodsSettlementGroup,
 } as ModelMap;
 
 export async function getRegionalModels(

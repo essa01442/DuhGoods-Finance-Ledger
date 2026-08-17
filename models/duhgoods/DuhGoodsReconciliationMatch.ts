@@ -46,6 +46,7 @@ export class DuhGoodsReconciliationMatch extends Doc {
   reviewedAt?: Date;
   reviewedBy?: string;
   decisionNotes?: string;
+  settlementGroup?: string;
   notes?: string;
 
   static override getListViewSettings(): ListViewSettings {

@@ -54,9 +54,9 @@ export class VATEngine {
   async getDefaultClassification(
     transactionType: string
   ): Promise<VATClassification> {
-    const policy = await this.fyo.doc.getDoc(
-      ModelNameEnum.DuhGoodsVATPolicy
-    ).catch(() => null);
+    const policy = await this.fyo.doc
+      .getDoc(ModelNameEnum.DuhGoodsVATPolicy)
+      .catch(() => null);
     if (!policy || !policy.enabled) return 'not_applicable';
 
     switch (transactionType) {
@@ -102,9 +102,9 @@ export class VATEngine {
       throw new Error(`Import record ${recordName} not found`);
     }
 
-    const policy = await this.fyo.doc.getDoc(
-      ModelNameEnum.DuhGoodsVATPolicy
-    ).catch(() => null);
+    const policy = await this.fyo.doc
+      .getDoc(ModelNameEnum.DuhGoodsVATPolicy)
+      .catch(() => null);
     if (!policy || !policy.enabled) {
       return {
         classification: 'not_applicable',
@@ -117,20 +117,24 @@ export class VATEngine {
       existing ||
       (await this.getDefaultClassification(record.transactionType as string));
 
-    const taxes = this.fyo.pesa(String(record.taxes ?? 0));
-    let vatAmount = taxes;
-    if (taxes.isZero()) {
-      const gross = this.fyo.pesa(String(record.grossAmount ?? 0));
-      const rate = (policy.standardRate as number) ?? 15;
-      if (
-        classification === 'taxable' ||
+    // Use source-supplied tax amount if present (even if zero).
+    // Never calculate VAT from gross — a zero-tax source record may be
+    // legitimately zero-rated or exempt.  Only mark review_required when
+    // the tax field is entirely absent AND the classification is taxable.
+    const taxFieldPresent = record.taxes != null;
+    const taxes = taxFieldPresent
+      ? this.fyo.pesa(String(record.taxes))
+      : this.fyo.pesa(0);
+
+    const vatAmount = taxes;
+    if (
+      !taxFieldPresent &&
+      (classification === 'taxable' ||
         classification === 'output_vat' ||
-        classification === 'input_vat'
-      ) {
-        vatAmount = gross.mul(rate).div(100);
-      } else {
-        vatAmount = this.fyo.pesa(0);
-      }
+        classification === 'input_vat')
+    ) {
+      // Source did not supply a tax amount for a taxable record — flag for review.
+      return { classification: 'review_required', vatAmount: this.fyo.pesa(0) };
     }
 
     return { classification, vatAmount };
@@ -162,9 +166,9 @@ export class VATEngine {
       }
     );
 
-    const policy = await this.fyo.doc.getDoc(
-      ModelNameEnum.DuhGoodsVATPolicy
-    ).catch(() => null);
+    const policy = await this.fyo.doc
+      .getDoc(ModelNameEnum.DuhGoodsVATPolicy)
+      .catch(() => null);
     const pesa = this.fyo.pesa.bind(this.fyo);
 
     let outputVAT = pesa(0);
@@ -182,7 +186,7 @@ export class VATEngine {
       if (classification === 'review_required') {
         reviewRequired++;
         exceptions.push(
-          `Record ${r.name}: VAT classification requires human review`
+          `Record ${String(r.name)}: VAT classification requires human review`
         );
       }
       if (
@@ -193,15 +197,12 @@ export class VATEngine {
         continue;
       }
 
-      const taxes = pesa(String(r.taxes ?? 0));
+      const taxes = r.taxes != null ? pesa(String(r.taxes)) : null;
       const gross = pesa(String(r.grossAmount ?? 0));
-      const rate = (policy?.standardRate as number) ?? 15;
-      let vatAmount =
-        r.vatAmount != null ? pesa(String(r.vatAmount)) : pesa(0);
-      if (vatAmount.isZero() && !taxes.isZero()) vatAmount = taxes;
-      if (vatAmount.isZero() && (classification === 'taxable' || classification === 'output_vat' || classification === 'input_vat')) {
-        vatAmount = gross.mul(rate).div(100);
-      }
+      // Use stored vatAmount if present; else fall back to source taxes.
+      // Never calculate from gross — that fabricates a tax fact.
+      let vatAmount = r.vatAmount != null ? pesa(String(r.vatAmount)) : pesa(0);
+      if (vatAmount.isZero() && taxes && !taxes.isZero()) vatAmount = taxes;
 
       lineItems.push({
         recordName: r.name as string,
@@ -209,15 +210,12 @@ export class VATEngine {
         transactionDate: date,
         currency: r.currency as string,
         grossAmount: gross,
-        taxes,
+        taxes: taxes ?? pesa(0),
         vatClassification: classification,
         vatAmount,
       });
 
-      if (
-        classification === 'output_vat' ||
-        classification === 'taxable'
-      ) {
+      if (classification === 'output_vat' || classification === 'taxable') {
         outputVAT = outputVAT.add(vatAmount);
       } else if (
         classification === 'input_vat' ||

@@ -26,7 +26,7 @@ export class FXGainsReport extends Report {
     super(fyo);
   }
 
-  async getFilters(): Promise<Field[]> {
+  getFilters(): Field[] {
     return [
       {
         fieldname: 'fromDate',
@@ -34,18 +34,18 @@ export class FXGainsReport extends Report {
         fieldtype: FieldTypeEnum.Date,
         required: false,
         section: 'Default',
-      } as Field,
+      } as unknown as Field,
       {
         fieldname: 'toDate',
         label: t`إلى تاريخ`,
         fieldtype: FieldTypeEnum.Date,
         required: false,
         section: 'Default',
-      } as Field,
+      } as unknown as Field,
     ];
   }
 
-  async getColumns(): Promise<ColumnField[]> {
+  getColumns(): ColumnField[] {
     return [
       {
         fieldname: 'date',
@@ -89,8 +89,8 @@ export class FXGainsReport extends Report {
   async setReportData(): Promise<void> {
     this.loading = true;
     try {
-      const from = (this.fromDate as string) + 'T00:00:00Z';
-      const to = (this.toDate as string) + 'T23:59:59Z';
+      const from = String(this.fromDate) + 'T00:00:00Z';
+      const to = String(this.toDate) + 'T23:59:59Z';
 
       const records = await this.fyo.db.getAll(
         ModelNameEnum.DuhGoodsImportRecord,
@@ -110,8 +110,13 @@ export class FXGainsReport extends Report {
         }
       );
 
-      const policy = await this.fyo.doc.getSingle(ModelNameEnum.DuhGoodsVATPolicy).catch(() => null);
-      const functionalCurrency = (policy as Record<string, unknown>)?.functionalCurrency as string || 'SAR';
+      /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
+      const policy: any = await (this.fyo.doc as any)
+        .getSingle(ModelNameEnum.DuhGoodsVATPolicy)
+        .catch(() => null);
+      const functionalCurrency: string =
+        (policy?.functionalCurrency as string) ?? 'SAR';
+      /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 
       const filteredRows = records.filter((r) => {
         if (r.currency === functionalCurrency) return false; // same-currency rows not relevant

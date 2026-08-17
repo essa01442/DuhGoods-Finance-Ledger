@@ -26,7 +26,7 @@ export class VATPositionReport extends Report {
     super(fyo);
   }
 
-  async getFilters(): Promise<Field[]> {
+  getFilters(): Field[] {
     return [
       {
         fieldname: 'fromDate',
@@ -34,18 +34,18 @@ export class VATPositionReport extends Report {
         fieldtype: FieldTypeEnum.Date,
         required: false,
         section: 'Default',
-      } as Field,
+      } as unknown as Field,
       {
         fieldname: 'toDate',
         label: t`إلى تاريخ`,
         fieldtype: FieldTypeEnum.Date,
         required: false,
         section: 'Default',
-      } as Field,
+      } as unknown as Field,
     ];
   }
 
-  async getColumns(): Promise<ColumnField[]> {
+  getColumns(): ColumnField[] {
     return [
       {
         fieldname: 'date',
@@ -84,31 +84,55 @@ export class VATPositionReport extends Report {
     this.loading = true;
     try {
       const engine = new VATEngine(this.fyo);
-      const from = new Date((this.fromDate as string) + 'T00:00:00Z');
-      const to = new Date((this.toDate as string) + 'T23:59:59Z');
+      const from = new Date(String(this.fromDate) + 'T00:00:00Z');
+      const to = new Date(String(this.toDate) + 'T23:59:59Z');
       const summary = await engine.getPeriodSummary(from, to);
 
       const headerRows: ReportData = [
         {
           cells: [
-            { rawValue: t`إجمالي ضريبة المبيعات (مخرجات)`, value: t`إجمالي ضريبة المبيعات (مخرجات)`, width: 3 },
-            { rawValue: summary.outputVAT.float, value: summary.outputVAT.store, width: 1 },
+            {
+              rawValue: t`إجمالي ضريبة المبيعات (مخرجات)`,
+              value: t`إجمالي ضريبة المبيعات (مخرجات)`,
+              width: 3,
+            },
+            {
+              rawValue: summary.outputVAT.float,
+              value: summary.outputVAT.store,
+              width: 1,
+            },
             { rawValue: '', value: '', width: 1 },
           ],
           isGroup: true,
         },
         {
           cells: [
-            { rawValue: t`إجمالي ضريبة المشتريات (مدخلات)`, value: t`إجمالي ضريبة المشتريات (مدخلات)`, width: 3 },
-            { rawValue: summary.inputVAT.float, value: summary.inputVAT.store, width: 1 },
+            {
+              rawValue: t`إجمالي ضريبة المشتريات (مدخلات)`,
+              value: t`إجمالي ضريبة المشتريات (مدخلات)`,
+              width: 3,
+            },
+            {
+              rawValue: summary.inputVAT.float,
+              value: summary.inputVAT.store,
+              width: 1,
+            },
             { rawValue: '', value: '', width: 1 },
           ],
           isGroup: true,
         },
         {
           cells: [
-            { rawValue: t`صافي الضريبة المستحقة`, value: t`صافي الضريبة المستحقة`, width: 3 },
-            { rawValue: summary.netVATPayable.float, value: summary.netVATPayable.store, width: 1 },
+            {
+              rawValue: t`صافي الضريبة المستحقة`,
+              value: t`صافي الضريبة المستحقة`,
+              width: 3,
+            },
+            {
+              rawValue: summary.netVATPayable.float,
+              value: summary.netVATPayable.store,
+              width: 1,
+            },
             { rawValue: '', value: '', width: 1 },
           ],
           isGroup: true,

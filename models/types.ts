@@ -90,6 +90,7 @@ export enum ModelNameEnum {
   DuhGoodsFXRate = 'DuhGoodsFXRate',
   DuhGoodsVATPolicy = 'DuhGoodsVATPolicy',
   DuhGoodsImportProfile = 'DuhGoodsImportProfile',
+  DuhGoodsSettlementGroup = 'DuhGoodsSettlementGroup',
 }
 
 export type ModelName = keyof typeof ModelNameEnum;
