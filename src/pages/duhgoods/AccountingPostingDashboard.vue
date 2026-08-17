@@ -202,6 +202,33 @@
         </div>
       </div>
 
+      <!-- Native currency, intentionally not posted -->
+      <div v-if="activeTab === 'native'" class="divide-y dark:divide-gray-700">
+        <div
+          v-for="posting in postingsByStatus('native_currency_not_posted')"
+          :key="posting.name"
+          class="p-4"
+        >
+          <div class="flex justify-between items-center">
+            <div>
+              <div class="text-sm font-medium dark:text-gray-200">
+                <bdi dir="ltr">{{ posting.name }}</bdi>
+              </div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">
+                {{ posting.postingType }}
+              </div>
+            </div>
+            <span class="text-gray-500 text-sm">{{ t`غير مرحّلة (بعملتها)` }}</span>
+          </div>
+        </div>
+        <div
+          v-if="postingsByStatus('native_currency_not_posted').length === 0"
+          class="p-8 text-center text-gray-400"
+        >
+          {{ t`لا توجد قيود بعملتها الأصلية في هذه الحالة` }}
+        </div>
+      </div>
+
       <!-- Exceptions -->
       <div
         v-if="activeTab === 'exceptions'"
@@ -299,7 +326,7 @@ export default defineComponent({
     const reversingPosting = ref('');
     const postings = ref<PostingRow[]>([]);
     const unpostedAccepted = ref<MatchRow[]>([]);
-    const activeTab = ref<'pending' | 'posted' | 'exceptions'>('pending');
+    const activeTab = ref<'pending' | 'posted' | 'native' | 'exceptions'>('pending');
     const allAccounts = ref<string[]>([]);
     const draftMapping = ref<Partial<DuhGoodsAccountMapping>>(loadStoredMapping());
     const showMappingConfig = ref(false);
@@ -307,15 +334,24 @@ export default defineComponent({
 
     const mappingFields = MAPPING_FIELDS;
 
-    const tabs = [
+    type TabValue = 'pending' | 'posted' | 'native' | 'exceptions';
+    const tabs: { label: string; value: TabValue }[] = [
       { label: t`في انتظار الترحيل`, value: 'pending' },
       { label: t`مرحّل`, value: 'posted' },
+      { label: t`بعملتها (غير مرحّلة)`, value: 'native' },
       { label: t`استثناءات`, value: 'exceptions' },
     ];
 
+    // Maps a tab's display value to the posting row's actual status column.
+    const TAB_STATUS: Record<string, string> = {
+      native: 'native_currency_not_posted',
+      exceptions: 'exception',
+    };
+
     const tabCount = (status: string) => {
       if (status === 'pending') return unpostedAccepted.value.length;
-      return postings.value.filter((p) => p.status === status).length;
+      const rowStatus = TAB_STATUS[status] ?? status;
+      return postings.value.filter((p) => p.status === rowStatus).length;
     };
 
     const postingsByStatus = (status: string) =>
