@@ -16,6 +16,7 @@ import createDuhGoodsAccountingPostingIndex from './createDuhGoodsAccountingPost
 import createDuhGoodsFXRateTable from './createDuhGoodsFXRateTable';
 import createDuhGoodsAuxTables from './createDuhGoodsAuxTables';
 import migrateDuhGoodsFXRateToText from './migrateDuhGoodsFXRateToText';
+import createDuhGoodsSettlementIntegrityConstraints from './createDuhGoodsSettlementIntegrityConstraints';
 
 export default [
   { name: 'testPatch', version: '0.5.0-beta.0', patch: testPatch },
@@ -87,5 +88,10 @@ export default [
     name: 'migrateDuhGoodsFXRateToText',
     version: '0.38.7',
     patch: migrateDuhGoodsFXRateToText,
+  },
+  {
+    name: 'createDuhGoodsSettlementIntegrityConstraints',
+    version: '0.38.8',
+    patch: createDuhGoodsSettlementIntegrityConstraints,
   },
 ] as Patch[];

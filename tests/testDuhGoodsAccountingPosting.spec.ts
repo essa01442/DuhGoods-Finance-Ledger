@@ -513,7 +513,11 @@ test('accounting posting: posts cross-currency evidence when explicit FX rate ex
     ModelNameEnum.DuhGoodsAccountingPosting,
     postingName
   );
-  t.equal(posting.status, 'posted', 'cross-currency evidence posts successfully');
+  t.equal(
+    posting.status,
+    'posted',
+    'cross-currency evidence posts successfully'
+  );
 
   // Verify the JournalEntry is balanced and amounts are in functional currency.
   const journal = await fyo.doc.getDoc(
@@ -523,14 +527,24 @@ test('accounting posting: posts cross-currency evidence when explicit FX rate ex
   const lines = journal.accounts as { debit: Money; credit: Money }[];
   const totalDebit = lines.reduce((s, l) => s.add(l.debit), fyo.pesa(0));
   const totalCredit = lines.reduce((s, l) => s.add(l.credit), fyo.pesa(0));
-  t.ok(totalDebit.sub(totalCredit).isZero(), 'JournalEntry is balanced in functional currency');
+  t.ok(
+    totalDebit.sub(totalCredit).isZero(),
+    'JournalEntry is balanced in functional currency'
+  );
 
   // Verify evidenceSnapshot records the FX conversion (rate and original currency).
   const snapshot = JSON.parse(posting.evidenceSnapshot as string) as {
     fxConversions: { rate: string; originalCurrency: string }[];
   };
-  t.ok(snapshot.fxConversions.length > 0, 'evidenceSnapshot contains FX conversion metadata');
-  t.equal(snapshot.fxConversions[0].originalCurrency, 'USD', 'original currency preserved in snapshot');
+  t.ok(
+    snapshot.fxConversions.length > 0,
+    'evidenceSnapshot contains FX conversion metadata'
+  );
+  t.equal(
+    snapshot.fxConversions[0].originalCurrency,
+    'USD',
+    'original currency preserved in snapshot'
+  );
   t.equal(snapshot.fxConversions[0].rate, '3.75', 'rate preserved in snapshot');
 
   t.end();

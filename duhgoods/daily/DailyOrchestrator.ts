@@ -4,6 +4,8 @@ import { ImportOrchestrator } from '../importers/ImportOrchestrator';
 import { WooCommerceImporter } from '../importers/WooCommerceImporter';
 import { PSPExportImporter } from '../importers/PSPExportImporter';
 import { BankStatementImporter } from '../importers/BankStatementImporter';
+import { ProfileDrivenImporter } from '../importers/ProfileDrivenImporter';
+import type { ProfileData } from '../importers/ProfileDrivenImporter';
 import { DuhGoodsReconciliationService } from '../reconciliation/ReconciliationService';
 import type { ImportResult } from '../importers/types';
 import { FXService } from '../fx/FXService';
@@ -168,6 +170,87 @@ export class DailyOrchestrator {
 
     const runSourceIds = results.map((r) => r.sourceId);
     return this.buildSummary(results, errors, fxResult, runSourceIds);
+  }
+
+  /**
+   * Imports a file using a saved DuhGoodsImportProfile.
+   *
+   * The profile supplies:
+   *   - sourceType  (psp_export | bank_statement | woocommerce | fx_rates)
+   *   - fileFormat  (json | csv)
+   *   - defaultCurrency — used when the file has no per-row currency column
+   *   - defaultSourceNamespace — used when opts.sourceNamespace is not given
+   *   - columnMappings — JSON: { logicalField: sourceColumnName, ... }
+   *   - parserOptions  — JSON: { delimiter, skipRows, defaultType, typeMap, ... }
+   *
+   * opts.sourceNamespace overrides the profile's defaultSourceNamespace.
+   * opts.sourceName overrides the profile's profileName as the import source label.
+   *
+   * No credentials, no network calls, no auto-FX lookup.
+   */
+  async runProfileImport(
+    profileName: string,
+    content: Buffer | string,
+    opts: {
+      sourceNamespace?: string;
+      sourceName?: string;
+      sourceFile?: string;
+    } = {}
+  ): Promise<TaggedImportResult> {
+    const profileRows = await this.fyo.db.getAll(
+      ModelNameEnum.DuhGoodsImportProfile,
+      {
+        filters: { name: profileName },
+        fields: [
+          'name',
+          'profileName',
+          'sourceType',
+          'fileFormat',
+          'defaultSourceNamespace',
+          'defaultCurrency',
+          'columnMappings',
+          'parserOptions',
+        ],
+        limit: 1,
+      }
+    );
+
+    if (profileRows.length === 0) {
+      throw new Error(`Import profile "${profileName}" not found`);
+    }
+
+    const row = profileRows[0];
+    const profileData: ProfileData = {
+      sourceType: String(row.sourceType ?? 'psp_export'),
+      fileFormat: String(row.fileFormat ?? 'json'),
+      defaultCurrency: row.defaultCurrency
+        ? String(row.defaultCurrency)
+        : undefined,
+      columnMappings: row.columnMappings
+        ? (JSON.parse(String(row.columnMappings)) as Record<string, string>)
+        : {},
+      parserOptions: row.parserOptions
+        ? (JSON.parse(String(row.parserOptions)) as Record<string, unknown>)
+        : {},
+    };
+
+    const adapter = new ProfileDrivenImporter(profileData);
+    const orchestrator = new ImportOrchestrator(this.fyo, adapter);
+
+    const defaultNs = row.defaultSourceNamespace
+      ? String(row.defaultSourceNamespace)
+      : `profile:${profileName}`;
+    const ns = opts.sourceNamespace ?? defaultNs;
+
+    const result = await orchestrator.import(content, {
+      sourceName:
+        opts.sourceName ??
+        (row.profileName ? String(row.profileName) : profileName),
+      sourceNamespace: ns,
+      sourceFile: opts.sourceFile,
+    });
+
+    return { ...result, sourceLabel: profileName };
   }
 
   /**

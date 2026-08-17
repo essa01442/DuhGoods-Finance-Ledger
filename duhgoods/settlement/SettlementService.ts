@@ -40,8 +40,11 @@ const SETTLEMENT_TOLERANCE = '0.01'; // SAR
  *    so the date range uniquely identifies each settlement period.
  *
  * Settlement groups are persisted as first-class DuhGoodsSettlementGroup records
- * with DB-level uniqueness on settlementRecord and status lifecycle
- * (open → closed, or closed → reopened).
+ * with DB-level uniqueness on settlementRecord (idx_dghsg_settlement_record) and
+ * member uniqueness enforced by the dghrm_prevent_accepted_insert_conflict trigger.
+ *
+ * acceptGroup() uses exception-based idempotency: it attempts an optimistic INSERT
+ * and catches UNIQUE-constraint errors rather than doing a racy SELECT-then-INSERT.
  */
 export class SettlementService {
   constructor(private readonly fyo: Fyo) {}
@@ -147,11 +150,15 @@ export class SettlementService {
   /**
    * Accepts a settlement group proposal.
    *
-   * Creates a DuhGoodsSettlementGroup record (idempotent — skipped if one already
-   * exists for the same settlementRecord). Creates one DuhGoodsReconciliationMatch
-   * per member→settlement pair, each linked to the group via settlementGroup.
-   * Marks all member and settlement import records as 'reconciled'.
-   * Sets the group status to 'closed' once all members are reconciled.
+   * Uses exception-based idempotency throughout — no SELECT-then-INSERT races:
+   *
+   *   Group creation: optimistic INSERT; on UNIQUE violation for settlementRecord
+   *   (idx_dghsg_settlement_record) reads back the existing group name.
+   *
+   *   Match creation: optimistic INSERT; on edgeKey UNIQUE violation skips the
+   *   member (already matched in a prior run); on trigger ABORT
+   *   (dghrm_prevent_accepted_insert_conflict) re-throws — that means the member
+   *   was accepted into a DIFFERENT group, which is a data integrity error.
    *
    * Throws on ambiguous proposals — human review required.
    */
@@ -167,22 +174,13 @@ export class SettlementService {
 
     const { settlementRecord, memberRecords } = proposal;
 
-    // Idempotency: check if a settlement group already exists for this settlement.
-    const existingGroups = await this.fyo.db.getAll(
-      ModelNameEnum.DuhGoodsSettlementGroup,
-      {
-        filters: { settlementRecord: settlementRecord.name },
-        fields: ['name', 'status'],
-        limit: 1,
-      }
-    );
-
+    // --- Group creation (optimistic INSERT, catch unique conflict) ---
     let groupName: string;
-    if (existingGroups.length > 0) {
-      groupName = existingGroups[0].name as string;
-    } else {
+    try {
       const now = new Date();
-      const group = this.fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsSettlementGroup);
+      const group = this.fyo.doc.getNewDoc(
+        ModelNameEnum.DuhGoodsSettlementGroup
+      );
       await group.setMultiple({
         settlementRecord: settlementRecord.name,
         currency: settlementRecord.currency,
@@ -212,9 +210,29 @@ export class SettlementService {
       });
       await group.sync();
       groupName = group.name as string;
+    } catch (err) {
+      if (isSettlementGroupUniqueConflict(err)) {
+        // A concurrent caller won the INSERT race for this settlementRecord.
+        const existing = await this.fyo.db.getAll(
+          ModelNameEnum.DuhGoodsSettlementGroup,
+          {
+            filters: { settlementRecord: settlementRecord.name },
+            fields: ['name', 'status'],
+            limit: 1,
+          }
+        );
+        if (existing.length === 0) throw err; // Unexpected: constraint fired but no row
+        groupName = existing[0].name as string;
+        if (existing[0].status === 'closed') {
+          // Already fully processed by the concurrent caller.
+          return groupName;
+        }
+      } else {
+        throw err;
+      }
     }
 
-    // Idempotency: skip members already reconciled (partial re-run protection).
+    // --- Early exit if settlement record already reconciled (full idempotency) ---
     const settlementRow = await this.fyo.db.get(
       ModelNameEnum.DuhGoodsImportRecord,
       settlementRecord.name
@@ -225,64 +243,61 @@ export class SettlementService {
 
     const now = new Date();
 
+    // --- Match creation (optimistic INSERT per member) ---
     for (const member of memberRecords) {
-      const existing = await this.fyo.db.getAll(
-        ModelNameEnum.DuhGoodsReconciliationMatch,
-        {
-          filters: {
-            leftRecord: member.name,
-            rightRecord: settlementRecord.name,
-          },
-          fields: ['name'],
-          limit: 1,
+      try {
+        const match = this.fyo.doc.getNewDoc(
+          ModelNameEnum.DuhGoodsReconciliationMatch
+        );
+        await match.setMultiple({
+          importRecord: member.name,
+          matchType: 'imported_evidence',
+          leftRecord: member.name,
+          rightRecord: settlementRecord.name,
+          leftEvidenceHash: member.evidenceHash,
+          rightEvidenceHash: settlementRecord.evidenceHash,
+          edgeKey: this.edgeKey(member.name, settlementRecord.name),
+          confidence: proposal.confidence === 'exact' ? 'high' : 'medium',
+          status: 'accepted',
+          matchedAt: now,
+          reviewedAt: now,
+          reviewedBy: reviewer,
+          settlementGroup: groupName,
+          reasonCodes: JSON.stringify(['settlement_member']),
+          amountDelta: proposal.delta,
+          dateDeltaDays: Math.abs(
+            (settlementRecord.transactionDate.getTime() -
+              member.transactionDate.getTime()) /
+              86400000
+          ),
+          evidenceSnapshot: JSON.stringify({
+            groupName,
+            member: {
+              name: member.name,
+              type: member.transactionType,
+              amount: member.netAmount.store,
+            },
+            settlement: {
+              name: settlementRecord.name,
+              type: settlementRecord.transactionType,
+              amount: settlementRecord.netAmount.store,
+            },
+            delta: proposal.delta.store,
+            confidence: proposal.confidence,
+          }),
+          decisionNotes:
+            `Settlement group ${groupName} accepted by ${reviewer}. ` +
+            `${memberRecords.length} member(s). Total: ${proposal.totalMemberNet.store} ${settlementRecord.currency}.`,
+        });
+        await match.sync();
+      } catch (err) {
+        if (isEdgeKeyUniqueConflict(err)) {
+          // This member was already inserted in a prior run of the same group — skip.
+          continue;
         }
-      );
-      if (existing.length > 0) continue;
-
-      const match = this.fyo.doc.getNewDoc(
-        ModelNameEnum.DuhGoodsReconciliationMatch
-      );
-      await match.setMultiple({
-        importRecord: member.name,
-        matchType: 'imported_evidence',
-        leftRecord: member.name,
-        rightRecord: settlementRecord.name,
-        leftEvidenceHash: member.evidenceHash,
-        rightEvidenceHash: settlementRecord.evidenceHash,
-        edgeKey: this.edgeKey(member.name, settlementRecord.name),
-        confidence: proposal.confidence === 'exact' ? 'high' : 'medium',
-        status: 'accepted',
-        matchedAt: now,
-        reviewedAt: now,
-        reviewedBy: reviewer,
-        settlementGroup: groupName,
-        reasonCodes: JSON.stringify(['settlement_member']),
-        amountDelta: proposal.delta,
-        dateDeltaDays: Math.abs(
-          (settlementRecord.transactionDate.getTime() -
-            member.transactionDate.getTime()) /
-            86400000
-        ),
-        evidenceSnapshot: JSON.stringify({
-          groupName,
-          member: {
-            name: member.name,
-            type: member.transactionType,
-            amount: member.netAmount.store,
-          },
-          settlement: {
-            name: settlementRecord.name,
-            type: settlementRecord.transactionType,
-            amount: settlementRecord.netAmount.store,
-          },
-          delta: proposal.delta.store,
-          confidence: proposal.confidence,
-        }),
-        decisionNotes:
-          `Settlement group ${groupName} accepted by ${reviewer}. ` +
-          `${memberRecords.length} member(s). Total: ${proposal.totalMemberNet.store} ${settlementRecord.currency}.`,
-      });
-      await match.sync();
+        // Any other error (including trigger ABORT for member in different group) propagates.
+        throw err;
+      }
 
       const memberDoc = await this.fyo.doc.getDoc(
         ModelNameEnum.DuhGoodsImportRecord,
@@ -333,7 +348,9 @@ export class SettlementService {
     );
     if (group.status !== 'closed') {
       throw new Error(
-        `Settlement group ${groupName} is ${String(group.status)}, not closed — cannot reopen`
+        `Settlement group ${groupName} is ${String(
+          group.status
+        )}, not closed — cannot reopen`
       );
     }
     await group.set('status', 'reopened');
@@ -344,4 +361,22 @@ export class SettlementService {
     const [min, max] = a < b ? [a, b] : [b, a];
     return `${min}:${max}`;
   }
+}
+
+function isSettlementGroupUniqueConflict(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    /UNIQUE constraint failed:.*DuhGoodsSettlementGroup.*settlementRecord/i.test(
+      err.message
+    )
+  );
+}
+
+function isEdgeKeyUniqueConflict(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    /UNIQUE constraint failed:.*DuhGoodsReconciliationMatch.*edgeKey/i.test(
+      err.message
+    )
+  );
 }

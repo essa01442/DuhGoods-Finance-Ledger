@@ -114,7 +114,8 @@ export class FXGainsReport extends Report {
       const policy: any = await (this.fyo.doc as any)
         .getSingle(ModelNameEnum.DuhGoodsVATPolicy)
         .catch(() => null);
-      const functionalCurrency: string = (policy?.functionalCurrency as string) ?? 'SAR';
+      const functionalCurrency: string =
+        (policy?.functionalCurrency as string) ?? 'SAR';
       /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 
       const filteredRows = records.filter((r) => {

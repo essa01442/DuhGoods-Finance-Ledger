@@ -195,7 +195,11 @@ test('SettlementService: acceptGroup - creates DuhGoodsSettlementGroup record', 
   t.ok(groupRow, 'settlement group record created');
   t.equal(groupRow.currency, 'JPY', 'group currency is JPY');
   t.equal(groupRow.memberCount, 2, 'group memberCount is 2');
-  t.equal(groupRow.status, 'closed', 'group status is closed after acceptGroup');
+  t.equal(
+    groupRow.status,
+    'closed',
+    'group status is closed after acceptGroup'
+  );
   t.end();
 });
 
@@ -231,7 +235,11 @@ test('SettlementService: acceptGroup - idempotent (second call is a no-op)', asy
       fields: ['name'],
     }
   );
-  t.equal(matchRows.length, 1, 'no duplicate match rows created by idempotent call');
+  t.equal(
+    matchRows.length,
+    1,
+    'no duplicate match rows created by idempotent call'
+  );
   t.end();
 });
 

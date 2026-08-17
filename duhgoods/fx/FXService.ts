@@ -153,7 +153,9 @@ export class FXService {
           baseCurrency,
           quoteCurrency,
           rate: invertRate(storedRate),
-          sourceDescription: `Derived (inverse of): ${String(r.sourceDescription)}`,
+          sourceDescription: `Derived (inverse of): ${String(
+            r.sourceDescription
+          )}`,
           origin: r.origin as string,
           derived: true,
         };
