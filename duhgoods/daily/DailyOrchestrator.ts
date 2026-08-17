@@ -8,7 +8,6 @@ import { ProfileDrivenImporter } from '../importers/ProfileDrivenImporter';
 import type { ProfileData } from '../importers/ProfileDrivenImporter';
 import { DuhGoodsReconciliationService } from '../reconciliation/ReconciliationService';
 import type { ImportResult } from '../importers/types';
-import { FXService } from '../fx/FXService';
 
 export interface DailyImportSpec {
   woocommerce?: {
@@ -28,16 +27,10 @@ export interface DailyImportSpec {
     fileName?: string;
     currency: string;
   };
-  fx?: { content: string; fileName?: string };
 }
 
 export interface TaggedImportResult extends ImportResult {
   sourceLabel: string;
-}
-
-export interface FXImportResult {
-  imported: number;
-  errors: string[];
 }
 
 export interface DailyControlSummary {
@@ -56,9 +49,7 @@ export interface DailyControlSummary {
   posted: number;
   postingExceptions: number;
   vatExceptions: number;
-  fxExceptions: number;
   importSources: TaggedImportResult[];
-  fxResult: FXImportResult | null;
   balanced: boolean;
   openItems: string[];
 }
@@ -70,9 +61,8 @@ export interface DailyControlSummary {
  *   1. Import WooCommerce file → evidence
  *   2. Import PSP export file → evidence
  *   3. Import bank statement file → evidence
- *   4. Optionally import FX rates file → FX evidence
- *   5. Run reconciliation engine → proposals
- *   6. Return control summary for review
+ *   4. Run reconciliation engine (same-currency only) → proposals
+ *   5. Return control summary for review
  *
  * buildSummary is scoped to the import records belonging to the current run's
  * source IDs. Counts reflect today's batch only, not accumulated historical data.
@@ -82,34 +72,16 @@ export interface DailyControlSummary {
  */
 export class DailyOrchestrator {
   private readonly reconciliation: DuhGoodsReconciliationService;
-  private readonly fx: FXService;
 
   constructor(private readonly fyo: Fyo) {
     this.reconciliation = new DuhGoodsReconciliationService(fyo);
-    this.fx = new FXService(fyo);
   }
 
   async runDailyImport(spec: DailyImportSpec): Promise<DailyControlSummary> {
     const results: TaggedImportResult[] = [];
     const errors: string[] = [];
-    let fxResult: FXImportResult | null = null;
 
-    // 1. FX rates first (other imports may need FX)
-    if (spec.fx) {
-      try {
-        const r = await this.fx.importFromJSON(spec.fx.content);
-        fxResult = { imported: r.imported ?? 0, errors: r.errors };
-        if (r.errors.length > 0) {
-          errors.push(...r.errors.map((e) => `FX: ${e}`));
-        }
-      } catch (e) {
-        errors.push(
-          `FX import failed: ${e instanceof Error ? e.message : String(e)}`
-        );
-      }
-    }
-
-    // 2. WooCommerce
+    // 1. WooCommerce
     if (spec.woocommerce) {
       try {
         const adapter = new WooCommerceImporter();
@@ -127,7 +99,7 @@ export class DailyOrchestrator {
       }
     }
 
-    // 3. PSP export
+    // 2. PSP export
     if (spec.psp) {
       try {
         const adapter = new PSPExportImporter();
@@ -143,7 +115,7 @@ export class DailyOrchestrator {
       }
     }
 
-    // 4. Bank statement
+    // 3. Bank statement
     if (spec.bank) {
       try {
         const adapter = new BankStatementImporter(spec.bank.currency);
@@ -159,7 +131,7 @@ export class DailyOrchestrator {
       }
     }
 
-    // 5. Run reconciliation
+    // 4. Run reconciliation (same currency only)
     try {
       await this.reconciliation.generateProposals();
     } catch (e) {
@@ -169,7 +141,7 @@ export class DailyOrchestrator {
     }
 
     const runSourceIds = results.map((r) => r.sourceId);
-    return this.buildSummary(results, errors, fxResult, runSourceIds);
+    return this.buildSummary(results, errors, runSourceIds);
   }
 
   /**
@@ -256,14 +228,13 @@ export class DailyOrchestrator {
   /**
    * Builds the daily control summary.
    *
-   * When runSourceIds is non-empty, reconciliation/posting/VAT/FX counts are
+   * When runSourceIds is non-empty, reconciliation/posting/VAT counts are
    * scoped to records that belong to the current run only. When empty (e.g.
    * called externally without run context), the full DB is queried.
    */
   async buildSummary(
     importResults: TaggedImportResult[],
     importErrors: string[] = [],
-    fxResult: FXImportResult | null = null,
     runSourceIds: string[] = []
   ): Promise<DailyControlSummary> {
     const totalImported = importResults.reduce((s, r) => s + r.imported, 0);
@@ -280,12 +251,12 @@ export class DailyOrchestrator {
         ? await this.fyo.db
             .getAll(ModelNameEnum.DuhGoodsImportRecord, {
               filters: { importSource: ['in', runSourceIds] },
-              fields: ['name', 'status', 'vatClassification', 'fxReviewNote'],
+              fields: ['name', 'status', 'vatClassification'],
             })
             .catch(() => [] as Record<string, unknown>[])
         : await this.fyo.db
             .getAll(ModelNameEnum.DuhGoodsImportRecord, {
-              fields: ['name', 'status', 'vatClassification', 'fxReviewNote'],
+              fields: ['name', 'status', 'vatClassification'],
             })
             .catch(() => [] as Record<string, unknown>[]);
 
@@ -365,9 +336,6 @@ export class DailyOrchestrator {
       (r) => r['vatClassification'] === 'review_required'
     ).length;
 
-    // FX exceptions: run-scoped records with fxReviewNote set.
-    const fxExceptions = runRecords.filter((r) => !!r['fxReviewNote']).length;
-
     const openItems: string[] = [];
     if (matched > 0)
       openItems.push(`${matched} طلبات مطابقة معلقة تنتظر المراجعة`);
@@ -378,8 +346,6 @@ export class DailyOrchestrator {
       openItems.push(`${postingExceptions} استثناءات ترحيل محاسبي`);
     if (vatExceptions > 0)
       openItems.push(`${vatExceptions} استثناءات ضريبة القيمة المضافة`);
-    if (fxExceptions > 0)
-      openItems.push(`${fxExceptions} استثناءات أسعار الصرف الأجنبي`);
     if (importErrors.length > 0)
       openItems.push(`${importErrors.length} أخطاء استيراد`);
 
@@ -401,9 +367,7 @@ export class DailyOrchestrator {
       posted,
       postingExceptions,
       vatExceptions,
-      fxExceptions,
       importSources: importResults,
-      fxResult,
       balanced,
       openItems,
     };

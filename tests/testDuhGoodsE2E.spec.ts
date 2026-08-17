@@ -21,7 +21,6 @@ import test from 'tape';
 import { ModelNameEnum } from 'models/types';
 import { DailyOrchestrator } from '../duhgoods/daily/DailyOrchestrator';
 import { VATEngine } from '../duhgoods/vat/VATEngine';
-import { FXService } from '../duhgoods/fx/FXService';
 import { DuhGoodsReconciliationService } from '../duhgoods/reconciliation/ReconciliationService';
 import { DuhGoodsAccountingPostingService } from '../duhgoods/accounting/AccountingPostingService';
 import { SettlementService } from '../duhgoods/settlement/SettlementService';
@@ -31,16 +30,6 @@ const fyo = getTestFyo();
 setupTestFyo(fyo, __filename);
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
-
-const FX_RATES_JSON = JSON.stringify([
-  {
-    date: '2026-08-10',
-    base: 'USD',
-    quote: 'SAR',
-    rate: '3.74',
-    source: 'Bank statement 2026-08-10',
-  },
-]);
 
 const WOO_ORDERS_JSON = JSON.stringify([
   // SAR order — no FX needed
@@ -165,7 +154,6 @@ async function buildAccountMap() {
 test('E2E: runDailyImport imports exact expected record count', async (t) => {
   const orchestrator = new DailyOrchestrator(fyo);
   const summary = await orchestrator.runDailyImport({
-    fx: { content: FX_RATES_JSON },
     woocommerce: { content: WOO_ORDERS_JSON, namespace: 'e2e-woo' },
     psp: { content: PSP_EXPORT_JSON, namespace: 'e2e-psp', currency: 'SAR' },
     bank: { content: BANK_JSON, namespace: 'e2e-bank', currency: 'SAR' },
@@ -188,20 +176,12 @@ test('E2E: runDailyImport imports exact expected record count', async (t) => {
   t.end();
 });
 
-// ── FX: USD source amount preserved exactly ───────────────────────────────────
+// ── Currency: USD source amount preserved exactly, never converted ────────────
 
-test('E2E: USD WooCommerce order preserves source USD amount', async (t) => {
+test('E2E: USD WooCommerce order keeps its native USD amount, never converted', async (t) => {
   const usdRecords = await fyo.db.getAll(ModelNameEnum.DuhGoodsImportRecord, {
     filters: { currency: 'USD' },
-    fields: [
-      'name',
-      'currency',
-      'grossAmount',
-      'netAmount',
-      'functionalCurrencyAmount',
-      'fxRate',
-      'fxReviewNote',
-    ],
+    fields: ['name', 'currency', 'grossAmount', 'netAmount'],
   });
 
   t.equal(usdRecords.length, 1, 'exactly one USD record');
@@ -214,38 +194,6 @@ test('E2E: USD WooCommerce order preserves source USD amount', async (t) => {
   t.ok(
     Math.abs(grossFloat - 100.0) < 0.005,
     `gross amount preserved as ~100 USD, got ${grossFloat}`
-  );
-
-  // Apply FX using local rate (3.74 USD/SAR from fixture).
-  const fxSvc = new FXService(fyo);
-  await fxSvc.applyToRecord(r.name as string, 'SAR');
-
-  const updated = await fyo.db.getAll(ModelNameEnum.DuhGoodsImportRecord, {
-    filters: { name: r.name as string },
-    fields: ['functionalCurrencyAmount', 'fxRate', 'fxReviewNote'],
-  });
-  const u = updated[0];
-
-  // Must have functional amount — not a review note.
-  t.ok(
-    !u.fxReviewNote,
-    `no fxReviewNote — rate was found (got: ${u.fxReviewNote})`
-  );
-  t.ok(u.functionalCurrencyAmount, 'functionalCurrencyAmount set');
-
-  // Must NOT assume rate 3.75; must use actual stored rate 3.74.
-  const fxRate = String(u.fxRate ?? '');
-  t.equal(
-    fxRate,
-    '3.74',
-    `applied rate is exactly '3.74' from evidence (got '${fxRate}')`
-  );
-
-  const functional = fyo.pesa(String(u.functionalCurrencyAmount ?? 0)).float;
-  // 100 USD × 3.74 = 374.00 SAR exactly.
-  t.ok(
-    Math.abs(functional - 374.0) < 0.005,
-    `functional amount is 374.00 SAR, got ${functional}`
   );
   t.end();
 });
@@ -483,7 +431,6 @@ test('E2E: Re-importing same data produces zero new records', async (t) => {
 
   const orchestrator = new DailyOrchestrator(fyo);
   const result = await orchestrator.runDailyImport({
-    fx: { content: FX_RATES_JSON },
     woocommerce: { content: WOO_ORDERS_JSON, namespace: 'e2e-woo' },
     psp: { content: PSP_EXPORT_JSON, namespace: 'e2e-psp', currency: 'SAR' },
     bank: { content: BANK_JSON, namespace: 'e2e-bank', currency: 'SAR' },
