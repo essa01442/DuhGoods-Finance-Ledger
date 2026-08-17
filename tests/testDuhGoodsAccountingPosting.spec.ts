@@ -284,6 +284,49 @@ test('accounting posting: blocks unaccepted and superseded reconciliation eviden
       'unaccepted reconciliation reports a posting exception'
     );
   }
+  const historicalException = await fyo.db.getAll(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    {
+      filters: { reconciliationMatch: unaccepted.match.name! },
+      fields: ['name', 'auditHistory'],
+    }
+  );
+  t.equal(historicalException.length, 1, 'unaccepted attempt is recorded');
+  const unacceptedMatch = await fyo.doc.getDoc(
+    ModelNameEnum.DuhGoodsReconciliationMatch,
+    unaccepted.match.name!
+  );
+  await unacceptedMatch.set('status', 'accepted');
+  await unacceptedMatch.sync();
+  const acceptedPostingName = await service.post(unaccepted.match.name!);
+  t.equal(
+    acceptedPostingName,
+    historicalException[0].name,
+    'accepted retry reuses the auditable exception record'
+  );
+  t.equal(
+    await service.post(unaccepted.match.name!),
+    acceptedPostingName,
+    'accepted retry remains idempotent'
+  );
+  const acceptedJournals = await fyo.db.getAll(ModelNameEnum.JournalEntry, {
+    filters: { referenceNumber: `DuhGoods:${unaccepted.match.name}` },
+    fields: ['name'],
+  });
+  t.equal(
+    acceptedJournals.length,
+    1,
+    'accepted retry creates one JournalEntry'
+  );
+  const acceptedPosting = await fyo.db.get(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    acceptedPostingName
+  );
+  t.ok(
+    (acceptedPosting.auditHistory as string).includes('unaccepted_match') &&
+      (acceptedPosting.auditHistory as string).includes('accepted_for_posting'),
+    'historical exception remains in append-only audit history'
+  );
 
   const superseded = await fixture(
     {
@@ -311,11 +354,6 @@ test('accounting posting: blocks unaccepted and superseded reconciliation eviden
       'superseded reconciliation reports a posting exception'
     );
   }
-  const journals = await fyo.db.getAll(ModelNameEnum.JournalEntry, {
-    filters: { referenceNumber: `DuhGoods:${unaccepted.match.name}` },
-    fields: ['name'],
-  });
-  t.equal(journals.length, 0, 'unaccepted reconciliation has no JournalEntry');
   t.end();
 });
 

@@ -58,8 +58,15 @@ export class DuhGoodsAccountingPostingService {
   private async postInternal(matchName: string): Promise<string> {
     const existing = await this.findPosting(matchName);
     if (existing) {
-      if (existing.status === 'exception')
-        throw new Error(existing.exceptionMessage as string);
+      if (existing.status === 'exception') {
+        const match = await this.fyo.db.get(
+          ModelNameEnum.DuhGoodsReconciliationMatch,
+          matchName
+        );
+        if (match.status !== 'accepted')
+          throw new Error(existing.exceptionMessage as string);
+        return this.reopenAcceptedException(existing);
+      }
       if (existing.status === 'posted') return existing.name as string;
       return this.resume(existing);
     }
@@ -273,6 +280,28 @@ export class DuhGoodsAccountingPostingService {
     });
     await reservation.sync();
     return reservation.name as string;
+  }
+  private async reopenAcceptedException(
+    posting: Record<string, unknown>
+  ): Promise<string> {
+    const exception = await this.fyo.doc.getDoc(
+      ModelNameEnum.DuhGoodsAccountingPosting,
+      posting.name as string,
+      { skipDocumentCache: true }
+    );
+    await exception.setMultiple({
+      status: 'reserving',
+      auditHistory: appendAudit(
+        exception.auditHistory as string,
+        'accepted_for_posting'
+      ),
+    });
+    await exception.sync();
+    return this.resume({
+      ...posting,
+      status: 'reserving',
+      reconciliationMatch: exception.reconciliationMatch,
+    });
   }
   private async findJournal(referenceNumber: string) {
     const rows = await this.fyo.db.getAll(ModelNameEnum.JournalEntry, {
