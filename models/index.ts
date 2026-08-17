@@ -61,6 +61,7 @@ import { ItemEnquiry } from './baseModels/ItemEnquiry/ItemEnquiry';
 import { DuhGoodsImportSource } from './duhgoods/DuhGoodsImportSource';
 import { DuhGoodsImportRecord } from './duhgoods/DuhGoodsImportRecord';
 import { DuhGoodsReconciliationMatch } from './duhgoods/DuhGoodsReconciliationMatch';
+import { DuhGoodsAccountingPosting } from './duhgoods/DuhGoodsAccountingPosting';
 
 export const models = {
   Account,
@@ -130,6 +131,7 @@ export const models = {
   DuhGoodsImportSource,
   DuhGoodsImportRecord,
   DuhGoodsReconciliationMatch,
+  DuhGoodsAccountingPosting,
 } as ModelMap;
 
 export async function getRegionalModels(
