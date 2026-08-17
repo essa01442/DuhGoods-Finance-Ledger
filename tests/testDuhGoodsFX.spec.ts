@@ -150,20 +150,23 @@ test('FXService: findRate - uses most recent rate on or before date', async (t) 
 });
 
 test('FXService: findRate - inverse pair lookup', async (t) => {
+  // Use JPY/SAR — never stored directly in any other test, so the inverse
+  // lookup must be used.  Store SAR/JPY, then look up JPY/SAR.
   const svc = new FXService(fyo);
   await svc.storeManualRate({
     effectiveDate: new Date('2026-07-20T00:00:00.000Z'),
     baseCurrency: 'SAR',
-    quoteCurrency: 'USD',
-    rate: 0.2667,
-    sourceDescription: 'SAR/USD inverse test',
+    quoteCurrency: 'JPY',
+    rate: '28.1',
+    sourceDescription: 'SAR/JPY inverse test',
   });
-  const result = await svc.findRate('USD', 'SAR', new Date('2026-07-20'));
+  const result = await svc.findRate('JPY', 'SAR', new Date('2026-07-20'));
   t.ok(result, 'found via inverse pair');
   t.ok(result!.derived, 'inverse rate marked as derived');
+  // 1 / 28.1 ≈ 0.03558...
   t.ok(
-    result!.rate.startsWith('3.74') || result!.rate.startsWith('3.75'),
-    `inverse rate is exact decimal near 3.75 (1/0.2667), got ${result!.rate}`
+    result!.rate.startsWith('0.035'),
+    `inverse rate is exact decimal ~0.03558 (1/28.1), got ${result!.rate}`
   );
   t.end();
 });

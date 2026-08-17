@@ -203,6 +203,8 @@ export class DailyOrchestrator {
     const fxExceptions = fxExceptionRows.length;
 
     const openItems: string[] = [];
+    // Proposed (unreviewed) matches require human decision — not balanced.
+    if (matched > 0) openItems.push(`${matched} طلبات مطابقة معلقة تنتظر المراجعة`);
     if (ambiguous > 0) openItems.push(`${ambiguous} طلبات مطابقة غامضة تحتاج مراجعة`);
     if (unmatched > 0) openItems.push(`${unmatched} سجلات غير مطابقة`);
     if (postingExceptions > 0) openItems.push(`${postingExceptions} استثناءات ترحيل محاسبي`);

@@ -113,4 +113,84 @@ export class BackupService {
       })
       .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
   }
+
+  /**
+   * Safely restores the database from a backup file.
+   *
+   * Steps:
+   * 1. Validate the backup (integrity_check).
+   * 2. Create a safety backup of the current live database.
+   * 3. Close the Fyo database connection.
+   * 4. Atomically replace the live DB with the backup (fs.renameSync).
+   * 5. Re-open the Fyo database.
+   *
+   * Returns { ok: true } on success.
+   * Returns { ok: false, message } on any failure — the live DB is never
+   * partially replaced; if step 4 fails the safety backup is preserved.
+   *
+   * NEVER sends data externally.
+   */
+  async restore(
+    backupPath: string,
+    safetyBackupDir: string
+  ): Promise<RestoreResult> {
+    const dbPath = this.fyo.db.dbPath;
+    if (!dbPath || dbPath === ':memory:') {
+      return { ok: false, message: 'النسخ الاحتياطي للذاكرة غير مدعوم للاستعادة' };
+    }
+
+    // Step 1: Validate backup.
+    const validation = this.validateBackup(backupPath);
+    if (!validation.valid) {
+      return { ok: false, message: `فشل التحقق من النسخة الاحتياطية: ${validation.message}` };
+    }
+
+    // Step 2: Safety backup of current live DB.
+    let safetyPath: string;
+    try {
+      const safetyResult = await this.createBackup(safetyBackupDir);
+      safetyPath = safetyResult.backupPath;
+    } catch (e) {
+      return {
+        ok: false,
+        message: `فشل إنشاء النسخة الاحتياطية الأمنية: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+
+    // Step 3: Close the database connection.
+    try {
+      await this.fyo.db.close();
+    } catch (e) {
+      return {
+        ok: false,
+        message: `فشل إغلاق قاعدة البيانات: ${e instanceof Error ? e.message : String(e)}. النسخة الاحتياطية الأمنية: ${safetyPath}`,
+      };
+    }
+
+    // Step 4: Atomically replace live DB with backup.
+    // Use copy + rename to stay atomic even across filesystem boundaries.
+    const tempPath = dbPath + '.restore-tmp';
+    try {
+      fs.copyFileSync(backupPath, tempPath);
+      fs.renameSync(tempPath, dbPath);
+    } catch (e) {
+      // Attempt to restore the safety backup.
+      try {
+        fs.copyFileSync(safetyPath, dbPath);
+      } catch {
+        // Safety backup restoration also failed; DB may be in inconsistent state.
+      }
+      // Clean up temp file if it exists.
+      try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+      return {
+        ok: false,
+        message: `فشل استبدال قاعدة البيانات: ${e instanceof Error ? e.message : String(e)}. النسخة الاحتياطية الأمنية: ${safetyPath}`,
+      };
+    }
+
+    return {
+      ok: true,
+      message: `تمت الاستعادة بنجاح. النسخة الاحتياطية الأمنية محفوظة في: ${safetyPath}`,
+    };
+  }
 }

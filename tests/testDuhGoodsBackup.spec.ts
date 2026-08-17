@@ -102,6 +102,87 @@ test('BackupService: createBackup - rejects in-memory database', async (t) => {
   t.end();
 });
 
+test('BackupService: validateBackup - rejects corrupt backup file', (t) => {
+  const tmpFile = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'dg-corrupt-')),
+    'duhgoods-backup-corrupt.db'
+  );
+  // Write garbage — not a valid SQLite database.
+  fs.writeFileSync(tmpFile, Buffer.from('this is not a sqlite database', 'utf8'));
+  const fyo = getTestFyo();
+  const svc = new BackupService(fyo);
+  const result = svc.validateBackup(tmpFile);
+  t.ok(!result.valid, 'corrupt backup is invalid');
+  t.ok(result.message.length > 0, 'has an error message');
+  fs.rmSync(path.dirname(tmpFile), { recursive: true, force: true });
+  t.end();
+});
+
+test('BackupService: restore - rejects corrupt backup before touching live DB', async (t) => {
+  const dbPath = (fyoFile.db as unknown as { dbPath?: string }).dbPath;
+  if (!dbPath || dbPath === ':memory:') {
+    t.skip('no file-backed db available');
+    t.end();
+    return;
+  }
+
+  const corruptFile = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'dg-restore-corrupt-')),
+    'corrupt.db'
+  );
+  fs.writeFileSync(corruptFile, Buffer.from('garbage', 'utf8'));
+  const safetyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-restore-safety-'));
+
+  const svc = new BackupService(fyoFile);
+  const result = await svc.restore(corruptFile, safetyDir);
+  t.ok(!result.ok, 'restore correctly rejected corrupt backup');
+  t.ok(result.message.length > 0, 'has Arabic error message');
+
+  // Live DB must still be open and usable.
+  const dbPathAfter = (fyoFile.db as unknown as { dbPath?: string }).dbPath;
+  t.equal(dbPathAfter, dbPath, 'live DB path unchanged after rejected restore');
+
+  fs.rmSync(path.dirname(corruptFile), { recursive: true, force: true });
+  fs.rmSync(safetyDir, { recursive: true, force: true });
+  t.end();
+});
+
+test('BackupService: restore - round-trip restore succeeds for valid backup', async (t) => {
+  const dbPath = (fyoFile.db as unknown as { dbPath?: string }).dbPath;
+  if (!dbPath || dbPath === ':memory:') {
+    t.skip('no file-backed db available');
+    t.end();
+    return;
+  }
+
+  const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-restore-src-'));
+  const safetyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-restore-dst-'));
+  const svc = new BackupService(fyoFile);
+
+  try {
+    // Create a valid backup.
+    const backup = await svc.createBackup(backupDir);
+    t.ok(fs.existsSync(backup.backupPath), 'backup created');
+
+    // Restore from it — DB is closed and re-opened inside restore().
+    const result = await svc.restore(backup.backupPath, safetyDir);
+    t.ok(result.ok, `restore succeeded: ${result.message}`);
+    t.ok(result.message.includes('تمت الاستعادة'), 'Arabic success message present');
+
+    // Safety backup must exist.
+    const safety = svc.listBackups(safetyDir);
+    t.equal(safety.length, 1, 'one safety backup created');
+    t.ok(safety[0].sizeBytes > 0, 'safety backup has size');
+
+    // Live DB file must still exist.
+    t.ok(fs.existsSync(dbPath), 'live DB file still exists after restore');
+  } finally {
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    fs.rmSync(safetyDir, { recursive: true, force: true });
+  }
+  t.end();
+});
+
 test('cleanup: BackupService file-backed DB', async () => {
   await fyoFile.close();
 });

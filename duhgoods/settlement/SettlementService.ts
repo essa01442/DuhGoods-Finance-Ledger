@@ -139,9 +139,15 @@ export class SettlementService {
   }
 
   /**
-   * Accepts a settlement group proposal and creates reconciliation matches.
-   * One match per member → settlement pair.
-   * Marks members and settlement as reconciled.
+   * Accepts a settlement group proposal.
+   *
+   * - Creates one DuhGoodsReconciliationMatch per member→settlement pair,
+   *   all sharing the same settlementGroupId so the group is queryable.
+   * - Marks every member import record AND the settlement import record as
+   *   'reconciled' so they no longer appear as unmatched.
+   * - Idempotent: if the settlement record is already reconciled, returns
+   *   without creating duplicate matches.
+   * - Refuses ambiguous proposals — human review required.
    */
   async acceptGroup(
     proposal: SettlementGroupProposal,
@@ -154,9 +160,32 @@ export class SettlementService {
     }
 
     const { settlementRecord, memberRecords } = proposal;
+
+    // Idempotency: if the settlement import record is already reconciled, skip.
+    const settlementRow = await this.fyo.db.get(
+      ModelNameEnum.DuhGoodsImportRecord,
+      settlementRecord.name
+    );
+    if ((settlementRow as Record<string, unknown>)?.status === 'reconciled') {
+      return;
+    }
+
+    // Stable group ID derived from settlement name — deterministic and unique.
+    const settlementGroupId = `sg:${settlementRecord.name}`;
     const now = new Date();
 
     for (const member of memberRecords) {
+      // Skip members already reconciled (partial re-run protection).
+      const existing = await this.fyo.db.getAll(
+        ModelNameEnum.DuhGoodsReconciliationMatch,
+        {
+          filters: { leftRecord: member.name, rightRecord: settlementRecord.name },
+          fields: ['name'],
+          limit: 1,
+        }
+      );
+      if (existing.length > 0) continue;
+
       const match = this.fyo.doc.getNewDoc(
         ModelNameEnum.DuhGoodsReconciliationMatch
       );
@@ -173,7 +202,7 @@ export class SettlementService {
         matchedAt: now,
         reviewedAt: now,
         reviewedBy: reviewer,
-        reasonCodes: JSON.stringify(['settlement_member']),
+        reasonCodes: JSON.stringify(['settlement_member', settlementGroupId]),
         amountDelta: proposal.delta,
         dateDeltaDays: Math.abs(
           (settlementRecord.transactionDate.getTime() -
@@ -181,13 +210,33 @@ export class SettlementService {
             86400000
         ),
         evidenceSnapshot: JSON.stringify({
+          groupId: settlementGroupId,
+          memberCount: memberRecords.length,
           member: { name: member.name, type: member.transactionType, amount: member.netAmount.store },
           settlement: { name: settlementRecord.name, type: settlementRecord.transactionType, amount: settlementRecord.netAmount.store },
+          delta: proposal.delta.store,
+          confidence: proposal.confidence,
         }),
-        decisionNotes: `Settlement group accepted by ${reviewer}. ${proposal.memberRecords.length} member(s).`,
+        decisionNotes: `Settlement group ${settlementGroupId} accepted by ${reviewer}. ${memberRecords.length} member(s). Total: ${proposal.totalMemberNet.store} ${settlementRecord.currency}.`,
       });
       await match.sync();
+
+      // Mark member import record as reconciled.
+      const memberDoc = await this.fyo.doc.getDoc(
+        ModelNameEnum.DuhGoodsImportRecord,
+        member.name
+      );
+      await memberDoc.setMultiple({ status: 'reconciled' });
+      await memberDoc.sync();
     }
+
+    // Mark the settlement import record itself as reconciled.
+    const settlementDoc = await this.fyo.doc.getDoc(
+      ModelNameEnum.DuhGoodsImportRecord,
+      settlementRecord.name
+    );
+    await settlementDoc.setMultiple({ status: 'reconciled' });
+    await settlementDoc.sync();
   }
 
   private nearestByDate(
