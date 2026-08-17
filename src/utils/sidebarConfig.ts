@@ -139,11 +139,6 @@ function getDuhGoodsSidebar(): SidebarRoot {
         route: '/duhgoods/vat-review',
       },
       {
-        label: t`مراجعة أسعار الصرف`,
-        name: 'duhgoods-fx',
-        route: '/duhgoods/fx-review',
-      },
-      {
         label: t`تقرير التحكم اليومي`,
         name: 'duhgoods-daily-report',
         route: '/report/DuhGoodsDailyControl',
@@ -152,11 +147,6 @@ function getDuhGoodsSidebar(): SidebarRoot {
         label: t`موقف ضريبة القيمة المضافة`,
         name: 'duhgoods-vat-report',
         route: '/report/DuhGoodsVATPosition',
-      },
-      {
-        label: t`أرباح وخسائر العملة الأجنبية`,
-        name: 'duhgoods-fx-report',
-        route: '/report/DuhGoodsFXGains',
       },
       {
         label: t`سجلات الاستيراد`,

@@ -16,7 +16,6 @@ import DailyWorkflow from 'src/pages/duhgoods/DailyWorkflow.vue';
 import ReconciliationReview from 'src/pages/duhgoods/ReconciliationReview.vue';
 import AccountingPostingDashboard from 'src/pages/duhgoods/AccountingPostingDashboard.vue';
 import VATReview from 'src/pages/duhgoods/VATReview.vue';
-import FXReview from 'src/pages/duhgoods/FXReview.vue';
 import BackupRestore from 'src/pages/duhgoods/BackupRestore.vue';
 import type { HistoryState } from 'vue-router';
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
@@ -162,11 +161,6 @@ const routes: RouteRecordRaw[] = [
     path: '/duhgoods/vat-review',
     name: 'VATReview',
     component: VATReview,
-  },
-  {
-    path: '/duhgoods/fx-review',
-    name: 'FXReview',
-    component: FXReview,
   },
   {
     path: '/duhgoods/backup-restore',

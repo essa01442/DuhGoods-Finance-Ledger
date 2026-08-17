@@ -8,7 +8,6 @@ import { StockBalance } from './inventory/StockBalance';
 import { StockLedger } from './inventory/StockLedger';
 import { DailyControlReport } from './duhgoods/DailyControlReport';
 import { VATPositionReport } from './duhgoods/VATPositionReport';
-import { FXGainsReport } from './duhgoods/FXGainsReport';
 
 export const reports = {
   GeneralLedger,
@@ -21,5 +20,4 @@ export const reports = {
   StockBalance,
   DuhGoodsDailyControl: DailyControlReport,
   DuhGoodsVATPosition: VATPositionReport,
-  DuhGoodsFXGains: FXGainsReport,
 } as const;
