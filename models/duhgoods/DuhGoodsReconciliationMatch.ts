@@ -17,10 +17,11 @@ const IMMUTABLE_FIELDS = [
   'rightEvidenceHash',
   'evidenceSnapshot',
 ] as const;
-const ASSESSMENT_FIELDS = [
+const PROPOSAL_LIFECYCLE_FIELDS = [
   'confidence',
   'reasonCodes',
   'assessmentHistory',
+  'supersededAt',
 ] as const;
 
 export class DuhGoodsReconciliationMatch extends Doc {
@@ -38,6 +39,7 @@ export class DuhGoodsReconciliationMatch extends Doc {
   dateDeltaDays?: number;
   reasonCodes?: string;
   assessmentHistory?: string;
+  supersededAt?: Date;
   leftEvidenceHash?: string;
   rightEvidenceHash?: string;
   evidenceSnapshot?: string;
@@ -78,7 +80,7 @@ export class DuhGoodsReconciliationMatch extends Doc {
       throw new Error('A reviewed reconciliation decision cannot be changed');
     }
     if (stored.status !== 'proposed') {
-      for (const field of ASSESSMENT_FIELDS) {
+      for (const field of PROPOSAL_LIFECYCLE_FIELDS) {
         if (
           !sameImmutableValue(
             stored[field],

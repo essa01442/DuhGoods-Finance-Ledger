@@ -40,6 +40,7 @@ const MATCH_FIELDS = [
   'confidence',
   'reasonCodes',
   'assessmentHistory',
+  'supersededAt',
 ];
 
 export class ReconciliationConflictError extends Error {
@@ -68,10 +69,15 @@ export class DuhGoodsReconciliationService {
     );
     for (const proposal of evaluation.proposals)
       await this.persistProposal(proposal);
+    await this.supersedeMissingProposals(
+      new Set(evaluation.proposals.map((proposal) => proposal.edgeKey))
+    );
     return evaluation;
   }
 
-  async getMatches(status?: 'proposed' | 'accepted' | 'rejected') {
+  async getMatches(
+    status?: 'proposed' | 'accepted' | 'rejected' | 'superseded'
+  ) {
     return this.fyo.db.getAll(ModelNameEnum.DuhGoodsReconciliationMatch, {
       filters: status ? { status } : undefined,
       fields: MATCH_FIELDS,
@@ -243,6 +249,22 @@ export class DuhGoodsReconciliationService {
       ),
     });
     await match.sync();
+  }
+
+  private async supersedeMissingProposals(
+    activeEdgeKeys: Set<string>
+  ): Promise<void> {
+    const proposed = await this.getMatches('proposed');
+    for (const match of proposed) {
+      if (activeEdgeKeys.has(match.edgeKey as string)) continue;
+      const doc = await this.fyo.doc.getDoc(
+        ModelNameEnum.DuhGoodsReconciliationMatch,
+        match.name as string,
+        { skipDocumentCache: true }
+      );
+      await doc.setMultiple({ status: 'superseded', supersededAt: new Date() });
+      await doc.sync();
+    }
   }
 }
 

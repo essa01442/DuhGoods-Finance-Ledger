@@ -85,7 +85,7 @@
       "label": "Status",
       "fieldtype": "Select",
       "required": true,
-      "options": ["proposed", "accepted", "rejected"],
+      "options": ["proposed", "accepted", "rejected", "superseded"],
       "default": "proposed",
       "section": "Default"
     },
@@ -135,6 +135,13 @@
       "fieldname": "assessmentHistory",
       "label": "Proposal Assessment History",
       "fieldtype": "Text",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
+      "fieldname": "supersededAt",
+      "label": "Superseded At",
+      "fieldtype": "Datetime",
       "readOnly": true,
       "section": "Evidence"
     },

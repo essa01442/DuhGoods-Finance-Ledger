@@ -35,6 +35,9 @@ async function createRecord(
     sourceId: string;
     transactionType: 'order' | 'payment';
     amount: string;
+    identityKey?: string;
+    evidenceVersion?: number;
+    status?: 'pending' | 'exception';
   }
 ): Promise<string> {
   const doc = fyo.doc.getNewDoc(ModelNameEnum.DuhGoodsImportRecord);
@@ -43,7 +46,8 @@ async function createRecord(
     sourceType: values.sourceType,
     sourceNamespace: `${values.sourceType}:service-test`,
     sourceId: values.sourceId,
-    identityKey: `${values.sourceType}:${values.sourceId}`,
+    identityKey:
+      values.identityKey ?? `${values.sourceType}:${values.sourceId}`,
     rowLocator: 0,
     transactionType: values.transactionType,
     transactionDate: new Date('2026-08-01T00:00:00.000Z'),
@@ -52,10 +56,10 @@ async function createRecord(
     fees: fyo.pesa('0'),
     taxes: fyo.pesa('0'),
     netAmount: fyo.pesa(values.amount),
-    status: 'pending',
+    status: values.status ?? 'pending',
     rawData: '{}',
     evidenceHash: values.sourceId.padEnd(64, 'x'),
-    evidenceVersion: 1,
+    evidenceVersion: values.evidenceVersion ?? 1,
     priorEvidenceHash: '',
   });
   await doc.sync();
@@ -220,6 +224,96 @@ test('reconciliation service: recomputes persisted proposal ambiguity without ch
     (await service.getMatches('proposed')).length,
     2,
     'concurrent repeated generation remains idempotent'
+  );
+  t.end();
+});
+
+test('reconciliation service: supersedes proposals absent from latest eligibility', async (t) => {
+  const service = new DuhGoodsReconciliationService(fyo);
+
+  const exceptionSource = await createSource();
+  const exceptionOrder = await createRecord(exceptionSource, {
+    sourceType: 'woocommerce',
+    sourceId: 'order-exception-v1',
+    transactionType: 'order',
+    amount: '333.33',
+  });
+  const exceptionPayment = await createRecord(exceptionSource, {
+    sourceType: 'psp_export',
+    sourceId: 'payment-exception',
+    transactionType: 'payment',
+    amount: '333.33',
+  });
+  await service.generateProposals();
+  await createRecord(exceptionSource, {
+    sourceType: 'woocommerce',
+    sourceId: 'order-exception-v2',
+    transactionType: 'order',
+    amount: '333.33',
+    identityKey: 'woocommerce:order-exception-v1',
+    evidenceVersion: 2,
+    status: 'exception',
+  });
+  await service.generateProposals();
+
+  const exceptionMatch = (await service.getMatches()).find(
+    (match) =>
+      match.edgeKey === [exceptionOrder, exceptionPayment].sort().join(':')
+  )!;
+  t.equal(
+    exceptionMatch.status,
+    'superseded',
+    'latest exception evidence supersedes the stale proposed edge'
+  );
+  t.ok(exceptionMatch.supersededAt, 'supersession is auditable');
+
+  let staleAcceptance: Error | null = null;
+  try {
+    await service.accept(
+      exceptionMatch.name as string,
+      'reviewer@example.test'
+    );
+  } catch (error) {
+    staleAcceptance = error instanceof Error ? error : new Error(String(error));
+  }
+  t.match(
+    staleAcceptance?.message ?? '',
+    /Only proposed reconciliations can be accepted/,
+    'a superseded edge cannot be accepted'
+  );
+
+  const eligibilitySource = await createSource();
+  const eligibilityOrder = await createRecord(eligibilitySource, {
+    sourceType: 'woocommerce',
+    sourceId: 'order-eligibility-v1',
+    transactionType: 'order',
+    amount: '444.44',
+  });
+  const eligibilityPayment = await createRecord(eligibilitySource, {
+    sourceType: 'psp_export',
+    sourceId: 'payment-eligibility',
+    transactionType: 'payment',
+    amount: '444.44',
+  });
+  await service.generateProposals();
+  await createRecord(eligibilitySource, {
+    sourceType: 'woocommerce',
+    sourceId: 'order-eligibility-v2',
+    transactionType: 'order',
+    amount: '555.55',
+    identityKey: 'woocommerce:order-eligibility-v1',
+    evidenceVersion: 2,
+  });
+  await service.generateProposals();
+
+  const eligibilityMatch = (await service.getMatches()).find(
+    (match) =>
+      match.edgeKey === [eligibilityOrder, eligibilityPayment].sort().join(':')
+  )!;
+  t.equal(
+    eligibilityMatch.status,
+    'superseded',
+    'a proposal removed by changed eligibility is superseded, not deleted'
   );
   t.end();
 });
