@@ -189,7 +189,7 @@ test('reconciliation: ambiguous close-date candidates remain proposed at medium 
   t.end();
 });
 
-test('reconciliation: reports compatible cross-currency records for future FX', (t) => {
+test('reconciliation: cross-currency records are never matched, never converted', (t) => {
   const evaluation = evaluateReconciliation(
     [
       record({ name: 'order-1', currency: 'SAR' }),
@@ -214,14 +214,14 @@ test('reconciliation: reports compatible cross-currency records for future FX', 
       {
         leftRecord: 'order-1',
         rightRecord: 'payment-1',
-        outcome: 'requires_future_fx',
+        outcome: 'different_currency_unmatched',
         reasonCodes: [
           'compatible_transaction_types',
-          'different_currency_requires_fx',
+          'different_currency_unmatched',
         ],
       },
     ],
-    'future FX outcome is explicit'
+    'different-currency outcome is explicit; no FX is implied'
   );
   t.end();
 });

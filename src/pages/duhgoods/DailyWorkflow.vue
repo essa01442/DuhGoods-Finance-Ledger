@@ -68,11 +68,6 @@
             :value="summary.vatExceptions"
             :highlight="summary.vatExceptions > 0"
           />
-          <StatCard
-            :label="t`استثناءات صرف أجنبي`"
-            :value="summary.fxExceptions"
-            :highlight="summary.fxExceptions > 0"
-          />
         </div>
       </div>
 
@@ -115,15 +110,6 @@
             :currency="bankCurrency"
             @currency-change="(v) => (bankCurrency = v)"
             :result="importResults.bank"
-          />
-
-          <!-- FX rates -->
-          <FileImportRow
-            :label="t`ملف أسعار الصرف (اختياري)`"
-            source-type="fx_rates"
-            @file-selected="(f) => (fxFile = f)"
-            :result="importResults.fx"
-            :optional="true"
           />
         </div>
 
@@ -429,18 +415,16 @@ export default defineComponent({
     const wooFile = ref<{ buffer: Buffer; name: string } | null>(null);
     const pspFile = ref<{ buffer: Buffer; name: string } | null>(null);
     const bankFile = ref<{ buffer: Buffer; name: string } | null>(null);
-    const fxFile = ref<{ buffer: Buffer; name: string } | null>(null);
 
     type DisplayResult = { imported: number; skipped: number; exceptions: number };
     const importResults = ref<{
       woocommerce?: DisplayResult | null;
       psp?: DisplayResult | null;
       bank?: DisplayResult | null;
-      fx?: DisplayResult | null;
     }>({});
 
     const hasAnyFile = computed(
-      () => !!(wooFile.value || pspFile.value || bankFile.value || fxFile.value)
+      () => !!(wooFile.value || pspFile.value || bankFile.value)
     );
 
     const orchestrator = new DailyOrchestrator(fyo);
@@ -513,7 +497,7 @@ export default defineComponent({
         if (summary.value) {
           const updatedSources = [...summary.value.importSources, result];
           const updatedSourceIds = [...summary.value.runSourceIds, result.sourceId];
-          summary.value = await orchestrator.buildSummary(updatedSources, [], null, updatedSourceIds);
+          summary.value = await orchestrator.buildSummary(updatedSources, [], updatedSourceIds);
         }
       } catch (e) {
         profileImportErrors.value = [e instanceof Error ? e.message : String(e)];
@@ -560,13 +544,6 @@ export default defineComponent({
           currency,
         };
       }
-      if (fxFile.value) {
-        spec.fx = {
-          content: fxFile.value.buffer.toString('utf8'),
-          fileName: fxFile.value.name,
-        };
-      }
-
       try {
         const result = await orchestrator.runDailyImport(spec);
         summary.value = result;
@@ -577,13 +554,6 @@ export default defineComponent({
           if (r.sourceLabel === 'woocommerce') importResults.value.woocommerce = d;
           else if (r.sourceLabel === 'psp') importResults.value.psp = d;
           else if (r.sourceLabel === 'bank') importResults.value.bank = d;
-        }
-        if (result.fxResult) {
-          importResults.value.fx = {
-            imported: result.fxResult.imported,
-            skipped: 0,
-            exceptions: result.fxResult.errors.length,
-          };
         }
       } catch (e) {
         importErrors.value = [e instanceof Error ? e.message : String(e)];
@@ -621,7 +591,6 @@ export default defineComponent({
       wooFile,
       pspFile,
       bankFile,
-      fxFile,
       importResults,
       hasAnyFile,
       runImport,

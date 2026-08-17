@@ -1,7 +1,6 @@
 import type { Fyo } from 'fyo';
 import { ModelNameEnum } from 'models/types';
 import type { Money } from 'pesa';
-import { toDecimalString, invertRate } from '../fx/FXService';
 
 export type DuhGoodsAccountMapping = {
   pspClearing: string;
@@ -34,18 +33,20 @@ type Evidence = {
 
 type Line = { account: string; debit: Money; credit: Money };
 
-type FXConversionMeta = {
-  evidenceName: string;
-  originalCurrency: string;
-  functionalCurrency: string;
-  rate: string;
-  rateEvidenceName?: string;
-  transactionDate: string;
-};
-
 /** File-driven conversion of accepted reconciliation evidence into Journal Entries. */
 export class DuhGoodsAccountingPostingService {
   private static readonly postingPromises = new Map<string, Promise<string>>();
+
+  /**
+   * GL (JournalEntry) posting is single-currency in Frappe Books. Every
+   * currency is kept in its own, unconverted amount (governing rule: no FX
+   * conversion, ever). When evidence currency differs from the system's
+   * configured currency, GL posting is skipped by default — the line is
+   * recorded as 'native_currency_not_posted' rather than thrown away or
+   * converted. Reports read DuhGoodsImportRecord directly and never depend
+   * on this flag or on GL posting having happened.
+   */
+  private static readonly glPostingEnabledForForeignCurrency = false;
 
   constructor(
     private readonly fyo: Fyo,
@@ -68,7 +69,11 @@ export class DuhGoodsAccountingPostingService {
   private async postInternal(matchName: string): Promise<string> {
     const existing = await this.findPosting(matchName);
     if (existing) {
-      if (existing.status === 'posted') return existing.name as string;
+      if (
+        existing.status === 'posted' ||
+        existing.status === 'native_currency_not_posted'
+      )
+        return existing.name as string;
       // Existing non-exception row in 'reserving' state: attempt crash-recovery.
       try {
         return await this.resume(existing);
@@ -98,29 +103,54 @@ export class DuhGoodsAccountingPostingService {
       );
 
     try {
-      const rawEvidence = await this.getCurrentEvidence(match);
-      const date = latestDate(rawEvidence);
+      const evidence = await this.getCurrentEvidence(match);
+      const date = latestDate(evidence);
       if (!date)
         throw new PostingException(
           'missing_fact',
           'Evidence transaction dates are required'
         );
-      const { evidence, fxConversions } =
-        await this.convertEvidenceToFunctionalCurrency(rawEvidence, date);
       const postingType = relation(evidence);
-      const lines = this.buildLines(postingType, evidence);
       const key = `${matchName}:${String(match.leftEvidenceHash)}:${String(
         match.rightEvidenceHash
       )}`;
       const reservation = this.fyo.doc.getNewDoc(
         ModelNameEnum.DuhGoodsAccountingPosting
       );
+
+      if (this.requiresGlPostingSkip(evidence)) {
+        await reservation.setMultiple({
+          reconciliationMatch: matchName,
+          idempotencyKey: key,
+          postingType,
+          status: 'native_currency_not_posted',
+          evidenceSnapshot: evidenceSnapshot(evidence),
+          accountSnapshot: JSON.stringify(this.accounts),
+          auditHistory: JSON.stringify([
+            {
+              action: 'native_currency_not_posted',
+              at: new Date().toISOString(),
+            },
+          ]),
+        });
+        try {
+          await reservation.sync();
+        } catch (error) {
+          if (!isDuplicatePosting(error)) throw error;
+          const concurrent = await this.findPosting(matchName);
+          if (concurrent) return concurrent.name as string;
+          throw error;
+        }
+        return reservation.name as string;
+      }
+
+      const lines = this.buildLines(postingType, evidence);
       await reservation.setMultiple({
         reconciliationMatch: matchName,
         idempotencyKey: key,
         postingType,
         status: 'reserving',
-        evidenceSnapshot: evidenceSnapshot(rawEvidence, fxConversions),
+        evidenceSnapshot: evidenceSnapshot(evidence),
         accountSnapshot: JSON.stringify(this.accounts),
         auditHistory: JSON.stringify([
           { action: 'reserved', at: new Date().toISOString() },
@@ -253,17 +283,26 @@ export class DuhGoodsAccountingPostingService {
         matchName
       );
       // Re-validate evidence — throws PostingException on superseded / invalid evidence.
-      const rawEvidence = await this.getCurrentEvidence(match);
-      const resumeDate = latestDate(rawEvidence);
+      const evidence = await this.getCurrentEvidence(match);
+      const resumeDate = latestDate(evidence);
       if (!resumeDate)
         throw new PostingException(
           'missing_fact',
           'Evidence transaction dates are required'
         );
-      const { evidence: convertedEvidence } =
-        await this.convertEvidenceToFunctionalCurrency(rawEvidence, resumeDate);
-      const postingType = relation(convertedEvidence);
-      const lines = this.buildLines(postingType, convertedEvidence);
+      if (this.requiresGlPostingSkip(evidence)) {
+        await reservation.setMultiple({
+          status: 'native_currency_not_posted',
+          auditHistory: appendAudit(
+            reservation.auditHistory as string,
+            'native_currency_not_posted'
+          ),
+        });
+        await reservation.sync();
+        return reservation.name as string;
+      }
+      const postingType = relation(evidence);
+      const lines = this.buildLines(postingType, evidence);
       const referenceNumber = `DuhGoods:${matchName}`;
       const recoveredJournal = this.fyo.doc.getNewDoc(
         ModelNameEnum.JournalEntry
@@ -348,114 +387,20 @@ export class DuhGoodsAccountingPostingService {
   }
 
   /**
-   * Converts all evidence to functional currency using explicit FX rates from
-   * DuhGoodsFXRate. Throws PostingException('requires_fx') only when no
-   * explicit rate exists for a foreign-currency evidence row.
-   *
-   * Same-currency evidence passes through unchanged. Amounts are converted
-   * with pesa exact arithmetic — never JS float multiplication.
+   * True when this evidence set cannot be posted to the (single-currency) GL
+   * without converting a foreign-currency amount. Governing rule: never
+   * convert. Evidence is posted to the GL only when its currency already
+   * matches the system's configured currency, or when GL posting for
+   * foreign currency has been explicitly opted into.
    */
-  private async convertEvidenceToFunctionalCurrency(
-    evidence: Evidence[],
-    transactionDate: Date
-  ): Promise<{ evidence: Evidence[]; fxConversions: FXConversionMeta[] }> {
-    const functionalCurrency = this.fyo.singles.SystemSettings?.currency;
-    if (!functionalCurrency) {
-      throw new PostingException(
-        'requires_fx',
-        'System functional currency is not configured in System Settings'
-      );
-    }
-
-    const fxConversions: FXConversionMeta[] = [];
-    const convertedEvidence: Evidence[] = [];
-    const dateStr = transactionDate.toISOString().slice(0, 10);
-
-    for (const row of evidence) {
-      if (!row.currency || row.currency === functionalCurrency) {
-        convertedEvidence.push(row);
-        continue;
-      }
-
-      // Look up direct rate: row.currency → functionalCurrency
-      const directRows = await this.fyo.db.getAll(
-        ModelNameEnum.DuhGoodsFXRate,
-        {
-          filters: {
-            baseCurrency: row.currency,
-            quoteCurrency: functionalCurrency,
-            effectiveDate: ['<=', dateStr],
-          },
-          fields: ['name', 'rate', 'effectiveDate'],
-          orderBy: 'effectiveDate',
-          order: 'desc',
-          limit: 1,
-        }
-      );
-
-      let rateStr: string | null = null;
-      let rateEvidenceName: string | null = null;
-
-      if (directRows.length > 0) {
-        rateStr = toDecimalString(directRows[0].rate);
-        rateEvidenceName = directRows[0].name as string;
-      } else {
-        // Look up inverse rate: functionalCurrency → row.currency, then invert
-        const inverseRows = await this.fyo.db.getAll(
-          ModelNameEnum.DuhGoodsFXRate,
-          {
-            filters: {
-              baseCurrency: functionalCurrency,
-              quoteCurrency: row.currency,
-              effectiveDate: ['<=', dateStr],
-            },
-            fields: ['name', 'rate'],
-            orderBy: 'effectiveDate',
-            order: 'desc',
-            limit: 1,
-          }
-        );
-        if (inverseRows.length > 0) {
-          const stored = toDecimalString(inverseRows[0].rate);
-          if (stored) {
-            rateStr = invertRate(stored);
-            rateEvidenceName = inverseRows[0].name as string;
-          }
-        }
-      }
-
-      if (!rateStr) {
-        throw new PostingException(
-          'requires_fx',
-          `No explicit FX rate for ${row.currency}/${functionalCurrency} on or before ` +
-            `${dateStr}. Add a rate in FX Review before posting.`
-        );
-      }
-
-      const rate = this.fyo.pesa(rateStr);
-      const conv = (m?: Money): Money | undefined =>
-        m ? m.mul(rate) : undefined;
-
-      fxConversions.push({
-        evidenceName: row.name,
-        originalCurrency: row.currency,
-        functionalCurrency,
-        rate: rateStr,
-        rateEvidenceName: rateEvidenceName ?? undefined,
-        transactionDate: dateStr,
-      });
-
-      convertedEvidence.push({
-        ...row,
-        currency: functionalCurrency,
-        grossAmount: conv(row.grossAmount),
-        fees: conv(row.fees),
-        taxes: conv(row.taxes),
-        netAmount: conv(row.netAmount),
-      });
-    }
-
-    return { evidence: convertedEvidence, fxConversions };
+  private requiresGlPostingSkip(evidence: Evidence[]): boolean {
+    if (DuhGoodsAccountingPostingService.glPostingEnabledForForeignCurrency)
+      return false;
+    const systemCurrency = this.fyo.singles.SystemSettings?.currency;
+    if (!systemCurrency) return false;
+    return evidence.some(
+      (row) => !!row.currency && row.currency !== systemCurrency
+    );
   }
 
   private async exception(
@@ -786,22 +731,19 @@ function isReversalClaimError(error: unknown): boolean {
     error.message.includes('DuhGoods accounting reversal already claimed')
   );
 }
-function evidenceSnapshot(
-  evidence: Evidence[],
-  fxConversions: FXConversionMeta[] = []
-): string {
+function evidenceSnapshot(evidence: Evidence[]): string {
   return JSON.stringify({
     evidence: evidence.map((item) => ({
       name: item.name,
       evidenceHash: item.evidenceHash,
       evidenceVersion: item.evidenceVersion,
       transactionType: item.transactionType,
+      currency: item.currency,
       grossAmount: item.grossAmount?.store,
       netAmount: item.netAmount?.store,
       fees: item.fees?.store,
       taxes: item.taxes?.store,
       rawData: item.rawData,
     })),
-    fxConversions,
   });
 }

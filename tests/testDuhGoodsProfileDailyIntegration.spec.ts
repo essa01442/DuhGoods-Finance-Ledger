@@ -203,7 +203,7 @@ test('PDI-3: Profile import sourceId is included in buildSummary run scope', asy
   const resultD = await orch.runProfileImport(profileDName, PROFILE_D_CONTENT);
 
   // Build summary scoped to these two profile imports.
-  const summary = await orch.buildSummary([resultC, resultD], [], null, [
+  const summary = await orch.buildSummary([resultC, resultD], [], [
     resultC.sourceId,
     resultD.sourceId,
   ]);

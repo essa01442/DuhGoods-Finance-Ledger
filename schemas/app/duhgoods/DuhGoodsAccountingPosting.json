@@ -35,7 +35,14 @@
       "fieldname": "status",
       "label": "Status",
       "fieldtype": "Select",
-      "options": ["reserving", "posted", "reversing", "reversed", "exception"],
+      "options": [
+        "reserving",
+        "posted",
+        "native_currency_not_posted",
+        "reversing",
+        "reversed",
+        "exception"
+      ],
       "required": true,
       "readOnly": true,
       "section": "Default"

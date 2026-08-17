@@ -7,8 +7,7 @@ export type ReconciliationReason =
   | 'exact_amount'
   | 'date_within_window'
   | 'explicit_reference'
-  | 'cross_currency_identity'
-  | 'different_currency_requires_fx'
+  | 'different_currency_unmatched'
   | 'date_outside_window'
   | 'amount_mismatch'
   | 'ambiguous_candidates'
@@ -48,7 +47,7 @@ export interface ReconciliationProposal {
 export interface ReconciliationOutcome {
   leftRecord: string;
   rightRecord: string;
-  outcome: 'requires_future_fx';
+  outcome: 'different_currency_unmatched';
   reasonCodes: ReconciliationReason[];
 }
 
@@ -151,26 +150,16 @@ export function evaluateReconciliation(
         if (!ordered) continue;
         const [leftO, rightO] = ordered;
 
-        // Different currencies: attempt reference-based identity before logging
-        // requires_future_fx. Never compare monetary amounts across currencies.
+        // Different currencies never match — each currency is reconciled only
+        // against itself. No cross-currency proposal is ever generated.
         const sameCurrency =
           !!leftO.currency &&
           !!rightO.currency &&
           leftO.currency === rightO.currency;
 
         if (!sameCurrency) {
-          const crossProposal = scoreCrossCurrencyPair(
-            leftO,
-            rightO,
-            relationship,
-            pesa
-          );
-          if (crossProposal) {
-            proposals.push(crossProposal);
-          } else {
-            const outcome = getCurrencyOutcome(leftO, rightO);
-            if (outcome) outcomes.push(outcome);
-          }
+          const outcome = getCurrencyOutcome(leftO, rightO);
+          if (outcome) outcomes.push(outcome);
           continue;
         }
 
@@ -324,72 +313,6 @@ function scorePair(
   };
 }
 
-/**
- * Scores a cross-currency pair for reconciliation based on shared references.
- *
- * Case B in the four-case model: when two records represent the same economic
- * event but in different currencies (e.g. WooCommerce USD order ↔ PSP SAR
- * payment), a shared order reference establishes identity WITHOUT comparing
- * monetary amounts and WITHOUT implying any FX rate.
- *
- * Source records are never modified. The match records only the identity
- * relationship; monetary conversion (if needed for accounting) is handled
- * separately by FXService.
- *
- * Returns null when no reliable reference links the two records.
- */
-function scoreCrossCurrencyPair(
-  left: ReconciliationRecord,
-  right: ReconciliationRecord,
-  relationship: Relationship,
-  pesa: (value: string | number) => Money
-): ReconciliationProposal | null {
-  if (!hasReliableReference(left, right)) return null;
-  if (!left.transactionDate || !right.transactionDate) return null;
-
-  const dateDeltaDays =
-    Math.abs(left.transactionDate.getTime() - right.transactionDate.getTime()) /
-    86400000;
-  if (dateDeltaDays > relationship.days) return null;
-
-  const reasonCodes: ReconciliationReason[] = [
-    'compatible_transaction_types',
-    'explicit_reference',
-    'cross_currency_identity',
-  ];
-
-  const [first, second] = [left.name, right.name].sort();
-  const firstRecord = left.name === first ? left : right;
-  const secondRecord = left.name === first ? right : left;
-  const edgeKey = `${first}:${second}`;
-
-  return {
-    leftRecord: first,
-    rightRecord: second,
-    matchType: 'imported_evidence',
-    confidence: 'high',
-    reasonCodes,
-    amountDelta: pesa(0),
-    dateDeltaDays,
-    edgeKey,
-    leftEvidenceHash: firstRecord.evidenceHash ?? '',
-    rightEvidenceHash: secondRecord.evidenceHash ?? '',
-    evidenceSnapshot: JSON.stringify({
-      matchKind: 'cross_currency_identity',
-      leftRecord: first,
-      rightRecord: second,
-      leftCurrency: firstRecord.currency,
-      rightCurrency: secondRecord.currency,
-      leftGrossAmount: firstRecord.grossAmount?.store ?? null,
-      rightGrossAmount: secondRecord.grossAmount?.store ?? null,
-      leftEvidenceHash: firstRecord.evidenceHash ?? '',
-      rightEvidenceHash: secondRecord.evidenceHash ?? '',
-      dateDeltaDays,
-      note: 'Cross-currency identity via shared reference; no monetary conversion applied; original amounts preserved',
-    }),
-  };
-}
-
 function applyAmbiguityConfidence(
   proposals: ReconciliationProposal[]
 ): ReconciliationProposal[] {
@@ -430,10 +353,10 @@ function getCurrencyOutcome(
   return {
     leftRecord,
     rightRecord,
-    outcome: 'requires_future_fx',
+    outcome: 'different_currency_unmatched',
     reasonCodes: [
       'compatible_transaction_types',
-      'different_currency_requires_fx',
+      'different_currency_unmatched',
     ],
   };
 }
