@@ -295,7 +295,6 @@ function scorePair(
       leftAmount: firstAmount.store,
       rightAmount: secondAmount.store,
       dateDeltaDays,
-      reasonCodes,
     }),
   };
 }

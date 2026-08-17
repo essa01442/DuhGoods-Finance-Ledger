@@ -132,6 +132,13 @@
       "section": "Evidence"
     },
     {
+      "fieldname": "assessmentHistory",
+      "label": "Proposal Assessment History",
+      "fieldtype": "Text",
+      "readOnly": true,
+      "section": "Evidence"
+    },
+    {
       "fieldname": "leftEvidenceHash",
       "label": "First Evidence Hash",
       "fieldtype": "Data",

@@ -38,6 +38,8 @@ const MATCH_FIELDS = [
   'decisionNotes',
   'edgeKey',
   'confidence',
+  'reasonCodes',
+  'assessmentHistory',
 ];
 
 export class ReconciliationConflictError extends Error {
@@ -159,15 +161,11 @@ export class DuhGoodsReconciliationService {
   private async persistProposal(
     proposal: ReconciliationProposal
   ): Promise<void> {
-    const existing = await this.fyo.db.getAll(
-      ModelNameEnum.DuhGoodsReconciliationMatch,
-      {
-        filters: { edgeKey: proposal.edgeKey },
-        fields: ['name'],
-        limit: 1,
-      }
-    );
-    if (existing.length) return;
+    const existing = await this.findProposal(proposal.edgeKey);
+    if (existing) {
+      await this.updateProposalAssessment(existing, proposal);
+      return;
+    }
     const match = this.fyo.doc.getNewDoc(
       ModelNameEnum.DuhGoodsReconciliationMatch
     );
@@ -185,12 +183,100 @@ export class DuhGoodsReconciliationService {
       amountDelta: proposal.amountDelta,
       dateDeltaDays: proposal.dateDeltaDays,
       reasonCodes: proposal.reasonCodes.join(','),
+      assessmentHistory: JSON.stringify([assessmentEntry(proposal)]),
       leftEvidenceHash: proposal.leftEvidenceHash,
       rightEvidenceHash: proposal.rightEvidenceHash,
       evidenceSnapshot: proposal.evidenceSnapshot,
     });
+    try {
+      await match.sync();
+    } catch (error) {
+      if (!isDuplicateEdgeError(error)) throw error;
+      const concurrent = await this.findProposal(proposal.edgeKey);
+      if (!concurrent) throw error;
+      await this.updateProposalAssessment(concurrent, proposal);
+    }
+  }
+
+  private async findProposal(edgeKey: string) {
+    const matches = await this.fyo.db.getAll(
+      ModelNameEnum.DuhGoodsReconciliationMatch,
+      {
+        filters: { edgeKey },
+        fields: [
+          'name',
+          'status',
+          'confidence',
+          'reasonCodes',
+          'assessmentHistory',
+        ],
+        limit: 1,
+      }
+    );
+    return matches[0];
+  }
+
+  private async updateProposalAssessment(
+    existing: Record<string, unknown>,
+    proposal: ReconciliationProposal
+  ): Promise<void> {
+    if (existing.status !== 'proposed') return;
+    const reasonCodes = proposal.reasonCodes.join(',');
+    if (
+      existing.confidence === proposal.confidence &&
+      existing.reasonCodes === reasonCodes
+    )
+      return;
+    const match = await this.fyo.doc.getDoc(
+      ModelNameEnum.DuhGoodsReconciliationMatch,
+      existing.name as string,
+      { skipDocumentCache: true }
+    );
+    await match.setMultiple({
+      confidence: proposal.confidence,
+      reasonCodes,
+      assessmentHistory: appendAssessmentHistory(
+        typeof existing.assessmentHistory === 'string'
+          ? existing.assessmentHistory
+          : '',
+        proposal
+      ),
+    });
     await match.sync();
   }
+}
+
+function assessmentEntry(proposal: ReconciliationProposal) {
+  return {
+    assessedAt: new Date().toISOString(),
+    confidence: proposal.confidence,
+    reasonCodes: proposal.reasonCodes,
+  };
+}
+
+function appendAssessmentHistory(
+  history: string,
+  proposal: ReconciliationProposal
+): string {
+  const entries = parseAssessmentHistory(history);
+  entries.push(assessmentEntry(proposal));
+  return JSON.stringify(entries);
+}
+
+function parseAssessmentHistory(history: string): unknown[] {
+  try {
+    const parsed: unknown = JSON.parse(history);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function isDuplicateEdgeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /UNIQUE constraint failed.*DuhGoodsReconciliationMatch/i.test(error.message)
+  );
 }
 
 function toReconciliationRecords(rows: DocValueMap[]): ReconciliationRecord[] {

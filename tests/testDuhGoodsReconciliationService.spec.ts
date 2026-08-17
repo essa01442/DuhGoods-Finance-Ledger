@@ -68,19 +68,19 @@ test('reconciliation service: persists idempotent proposals and preserves decisi
     sourceType: 'woocommerce',
     sourceId: 'order-service',
     transactionType: 'order',
-    amount: '100.00',
+    amount: '777.77',
   });
   await createRecord(source, {
     sourceType: 'psp_export',
     sourceId: 'payment-service-1',
     transactionType: 'payment',
-    amount: '100.00',
+    amount: '777.77',
   });
   await createRecord(source, {
     sourceType: 'psp_export',
     sourceId: 'payment-service-2',
     transactionType: 'payment',
-    amount: '100.00',
+    amount: '777.77',
   });
 
   const service = new DuhGoodsReconciliationService(fyo);
@@ -160,6 +160,67 @@ test('reconciliation service: persists idempotent proposals and preserves decisi
     overwritten = error instanceof Error ? error : new Error(String(error));
   }
   t.ok(overwritten, 'a reviewed decision cannot be silently overwritten');
+  t.end();
+});
+
+test('reconciliation service: recomputes persisted proposal ambiguity without changing evidence', async (t) => {
+  const source = await createSource();
+  await createRecord(source, {
+    sourceType: 'woocommerce',
+    sourceId: 'order-recompute',
+    transactionType: 'order',
+    amount: '555.55',
+  });
+  await createRecord(source, {
+    sourceType: 'psp_export',
+    sourceId: 'payment-recompute-1',
+    transactionType: 'payment',
+    amount: '555.55',
+  });
+
+  const service = new DuhGoodsReconciliationService(fyo);
+  await service.generateProposals();
+  const initial = await service.getMatches('proposed');
+  t.equal(initial.length, 1, 'first run persists one candidate');
+  t.equal(
+    initial[0].confidence,
+    'high',
+    'single candidate starts high confidence'
+  );
+
+  await createRecord(source, {
+    sourceType: 'psp_export',
+    sourceId: 'payment-recompute-2',
+    transactionType: 'payment',
+    amount: '555.55',
+  });
+  await service.generateProposals();
+
+  const recomputed = await service.getMatches('proposed');
+  t.equal(recomputed.length, 2, 'second run persists both valid candidates');
+  t.ok(
+    recomputed.every((match) => match.confidence === 'medium'),
+    'existing and new candidates both reflect ambiguity'
+  );
+  t.ok(
+    recomputed.every((match) =>
+      String(match.reasonCodes).includes('ambiguous_candidates')
+    ),
+    'ambiguity reason is persisted for both candidates'
+  );
+  const updated = recomputed.find((match) => match.name === initial[0].name)!;
+  t.equal(
+    JSON.parse(updated.assessmentHistory as string).length,
+    2,
+    'the original high assessment remains auditable after recomputation'
+  );
+
+  await Promise.all([service.generateProposals(), service.generateProposals()]);
+  t.equal(
+    (await service.getMatches('proposed')).length,
+    2,
+    'concurrent repeated generation remains idempotent'
+  );
   t.end();
 });
 

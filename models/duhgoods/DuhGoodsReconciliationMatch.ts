@@ -10,14 +10,17 @@ const IMMUTABLE_FIELDS = [
   'leftRecord',
   'rightRecord',
   'edgeKey',
-  'confidence',
   'matchedAt',
   'amountDelta',
   'dateDeltaDays',
-  'reasonCodes',
   'leftEvidenceHash',
   'rightEvidenceHash',
   'evidenceSnapshot',
+] as const;
+const ASSESSMENT_FIELDS = [
+  'confidence',
+  'reasonCodes',
+  'assessmentHistory',
 ] as const;
 
 export class DuhGoodsReconciliationMatch extends Doc {
@@ -34,6 +37,7 @@ export class DuhGoodsReconciliationMatch extends Doc {
   amountDelta?: Money;
   dateDeltaDays?: number;
   reasonCodes?: string;
+  assessmentHistory?: string;
   leftEvidenceHash?: string;
   rightEvidenceHash?: string;
   evidenceSnapshot?: string;
@@ -72,6 +76,20 @@ export class DuhGoodsReconciliationMatch extends Doc {
     }
     if (stored.status !== 'proposed' && this.status !== stored.status) {
       throw new Error('A reviewed reconciliation decision cannot be changed');
+    }
+    if (stored.status !== 'proposed') {
+      for (const field of ASSESSMENT_FIELDS) {
+        if (
+          !sameImmutableValue(
+            stored[field],
+            (this as Record<string, unknown>)[field]
+          )
+        ) {
+          throw new Error(
+            `DuhGoodsReconciliationMatch: field "${field}" cannot be changed after review`
+          );
+        }
+      }
     }
     if (this.status !== 'accepted') return;
     const accepted = await this.fyo.db.getAll(this.schemaName, {
