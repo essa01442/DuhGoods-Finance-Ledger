@@ -103,7 +103,15 @@ export class FXService {
         quoteCurrency,
         effectiveDate: ['<=', dateStr],
       },
-      fields: ['name', 'effectiveDate', 'baseCurrency', 'quoteCurrency', 'rate', 'sourceDescription', 'origin'],
+      fields: [
+        'name',
+        'effectiveDate',
+        'baseCurrency',
+        'quoteCurrency',
+        'rate',
+        'sourceDescription',
+        'origin',
+      ],
       orderBy: 'effectiveDate',
       order: 'desc',
       limit: 1,
@@ -111,17 +119,28 @@ export class FXService {
 
     if (rows.length === 0) {
       // Try inverse pair
-      const inverseRows = await this.fyo.db.getAll(ModelNameEnum.DuhGoodsFXRate, {
-        filters: {
-          baseCurrency: quoteCurrency,
-          quoteCurrency: baseCurrency,
-          effectiveDate: ['<=', dateStr],
-        },
-        fields: ['name', 'effectiveDate', 'baseCurrency', 'quoteCurrency', 'rate', 'sourceDescription', 'origin'],
-        orderBy: 'effectiveDate',
-        order: 'desc',
-        limit: 1,
-      });
+      const inverseRows = await this.fyo.db.getAll(
+        ModelNameEnum.DuhGoodsFXRate,
+        {
+          filters: {
+            baseCurrency: quoteCurrency,
+            quoteCurrency: baseCurrency,
+            effectiveDate: ['<=', dateStr],
+          },
+          fields: [
+            'name',
+            'effectiveDate',
+            'baseCurrency',
+            'quoteCurrency',
+            'rate',
+            'sourceDescription',
+            'origin',
+          ],
+          orderBy: 'effectiveDate',
+          order: 'desc',
+          limit: 1,
+        }
+      );
       if (inverseRows.length > 0) {
         const r = inverseRows[0];
         const storedRate = toDecimalString(r.rate);
@@ -134,7 +153,7 @@ export class FXService {
           baseCurrency,
           quoteCurrency,
           rate: invertRate(storedRate),
-          sourceDescription: `Derived (inverse of): ${r.sourceDescription}`,
+          sourceDescription: `Derived (inverse of): ${String(r.sourceDescription)}`,
           origin: r.origin as string,
           derived: true,
         };
@@ -177,7 +196,12 @@ export class FXService {
         sourceCurrency,
         functionalCurrency,
         transactionDate,
-        message: `No FX rate evidence found for ${sourceCurrency}/${functionalCurrency} on or before ${transactionDate.toISOString().slice(0, 10)}. Import a local FX rate file or enter a rate manually.`,
+        message: `No FX rate evidence found for ${sourceCurrency}/${functionalCurrency} on or before ${transactionDate
+          .toISOString()
+          .slice(
+            0,
+            10
+          )}. Import a local FX rate file or enter a rate manually.`,
       };
     }
 
@@ -250,7 +274,8 @@ export class FXService {
     if (this.isMissingRateException(result)) {
       await doc.setMultiple({
         fxReviewNote: result.message,
-        vatClassification: (doc.vatClassification as string) || 'review_required',
+        vatClassification:
+          (doc.vatClassification as string) || 'review_required',
       });
       await doc.sync();
       return { ok: false, message: result.message };
@@ -259,7 +284,10 @@ export class FXService {
     await doc.setMultiple({
       functionalCurrencyAmount: result.functionalAmount as never,
       fxRate: result.rate,
-      fxRateRef: result.rateEvidenceName === '__identity__' ? undefined : result.rateEvidenceName,
+      fxRateRef:
+        result.rateEvidenceName === '__identity__'
+          ? undefined
+          : result.rateEvidenceName,
       fxReviewNote: undefined,
     });
     await doc.sync();
@@ -339,12 +367,15 @@ export class FXService {
   ): Promise<{ imported: number; skipped: number; errors: string[] }> {
     let rows: unknown[];
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       rows = JSON.parse(content);
       if (!Array.isArray(rows)) {
         throw new Error('Expected JSON array');
       }
     } catch (e) {
-      throw new Error(`Invalid FX rate JSON: ${e instanceof Error ? e.message : String(e)}`);
+      throw new Error(
+        `Invalid FX rate JSON: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
 
     let imported = 0;
@@ -371,13 +402,26 @@ export class FXService {
         }
 
         const effectiveDate = new Date(dateStr + 'T00:00:00Z');
-        const evidenceHash = computeEvidenceHash({ date: dateStr, base, quote, rate, source });
-
-        const existing = await this.fyo.db.getAll(ModelNameEnum.DuhGoodsFXRate, {
-          filters: { effectiveDate: dateStr, baseCurrency: base, quoteCurrency: quote },
-          fields: ['name'],
-          limit: 1,
+        const evidenceHash = computeEvidenceHash({
+          date: dateStr,
+          base,
+          quote,
+          rate,
+          source,
         });
+
+        const existing = await this.fyo.db.getAll(
+          ModelNameEnum.DuhGoodsFXRate,
+          {
+            filters: {
+              effectiveDate: dateStr,
+              baseCurrency: base,
+              quoteCurrency: quote,
+            },
+            fields: ['name'],
+            limit: 1,
+          }
+        );
 
         if (existing.length > 0) {
           skipped++;

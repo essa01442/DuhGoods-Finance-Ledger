@@ -33,7 +33,13 @@ setupTestFyo(fyo, __filename);
 // ── Fixture ───────────────────────────────────────────────────────────────────
 
 const FX_RATES_JSON = JSON.stringify([
-  { date: '2026-08-10', base: 'USD', quote: 'SAR', rate: '3.74', source: 'Bank statement 2026-08-10' },
+  {
+    date: '2026-08-10',
+    base: 'USD',
+    quote: 'SAR',
+    rate: '3.74',
+    source: 'Bank statement 2026-08-10',
+  },
 ]);
 
 const WOO_ORDERS_JSON = JSON.stringify([
@@ -84,16 +90,53 @@ const WOO_ORDERS_JSON = JSON.stringify([
 // PSP: payment + fee + settlement
 // Actual fees are authoritative — formula must NOT replace them.
 const PSP_EXPORT_JSON = JSON.stringify([
-  { id: 'psp-pay-2001', type: 'payment', date: '2026-08-10', currency: 'SAR', gross: 500.0, net: 490.0, fee: 10.0 },
-  { id: 'psp-pay-2002', type: 'payment', date: '2026-08-10', currency: 'SAR', gross: 374.0, net: 366.0, fee: 8.0 },
-  { id: 'psp-refund-2003', type: 'refund', date: '2026-08-10', currency: 'SAR', gross: -200.0, net: -200.0, fee: 0.0 },
+  {
+    id: 'psp-pay-2001',
+    type: 'payment',
+    date: '2026-08-10',
+    currency: 'SAR',
+    gross: 500.0,
+    net: 490.0,
+    fee: 10.0,
+  },
+  {
+    id: 'psp-pay-2002',
+    type: 'payment',
+    date: '2026-08-10',
+    currency: 'SAR',
+    gross: 374.0,
+    net: 366.0,
+    fee: 8.0,
+  },
+  {
+    id: 'psp-refund-2003',
+    type: 'refund',
+    date: '2026-08-10',
+    currency: 'SAR',
+    gross: -200.0,
+    net: -200.0,
+    fee: 0.0,
+  },
   // Settlement: sum of net amounts = 490 + 366 - 200 = 656
-  { id: 'psp-settle-aug10', type: 'payout', date: '2026-08-12', currency: 'SAR', gross: 656.0, net: 656.0, fee: 0.0 },
+  {
+    id: 'psp-settle-aug10',
+    type: 'payout',
+    date: '2026-08-12',
+    currency: 'SAR',
+    gross: 656.0,
+    net: 656.0,
+    fee: 0.0,
+  },
 ]);
 
 // Bank: credit matching settlement amount exactly
 const BANK_JSON = JSON.stringify([
-  { date: '2026-08-13', description: 'Stripe Settlement Aug 10', credit: '656.00', debit: '' },
+  {
+    date: '2026-08-13',
+    description: 'Stripe Settlement Aug 10',
+    credit: '656.00',
+    debit: '',
+  },
 ]);
 
 /** Build account map from whatever accounts exist in the test DB. */
@@ -102,7 +145,8 @@ async function buildAccountMap() {
     fields: ['name'],
     limit: 9,
   });
-  const a = (i: number) => accounts[Math.min(i, accounts.length - 1)].name as string;
+  const a = (i: number) =>
+    accounts[Math.min(i, accounts.length - 1)].name as string;
   return {
     pspClearing: a(0),
     bank: a(1),
@@ -128,8 +172,18 @@ test('E2E: runDailyImport imports exact expected record count', async (t) => {
   });
 
   // 3 WooCommerce orders + 4 PSP records + 1 bank credit = 8
-  t.equal(summary.errors, 0, `zero import errors (got: ${JSON.stringify(summary.importSources.map(r => r.errors))})`);
-  t.equal(summary.imported, 8, `exactly 8 records imported (got ${summary.imported})`);
+  t.equal(
+    summary.errors,
+    0,
+    `zero import errors (got: ${JSON.stringify(
+      summary.importSources.map((r) => r.errors)
+    )})`
+  );
+  t.equal(
+    summary.imported,
+    8,
+    `exactly 8 records imported (got ${summary.imported})`
+  );
   t.equal(summary.skipped, 0, 'zero skipped on first import');
   t.end();
 });
@@ -139,7 +193,15 @@ test('E2E: runDailyImport imports exact expected record count', async (t) => {
 test('E2E: USD WooCommerce order preserves source USD amount', async (t) => {
   const usdRecords = await fyo.db.getAll(ModelNameEnum.DuhGoodsImportRecord, {
     filters: { currency: 'USD' },
-    fields: ['name', 'currency', 'grossAmount', 'netAmount', 'functionalCurrencyAmount', 'fxRate', 'fxReviewNote'],
+    fields: [
+      'name',
+      'currency',
+      'grossAmount',
+      'netAmount',
+      'functionalCurrencyAmount',
+      'fxRate',
+      'fxReviewNote',
+    ],
   });
 
   t.equal(usdRecords.length, 1, 'exactly one USD record');
@@ -165,16 +227,26 @@ test('E2E: USD WooCommerce order preserves source USD amount', async (t) => {
   const u = updated[0];
 
   // Must have functional amount — not a review note.
-  t.ok(!u.fxReviewNote, `no fxReviewNote — rate was found (got: ${u.fxReviewNote})`);
+  t.ok(
+    !u.fxReviewNote,
+    `no fxReviewNote — rate was found (got: ${u.fxReviewNote})`
+  );
   t.ok(u.functionalCurrencyAmount, 'functionalCurrencyAmount set');
 
   // Must NOT assume rate 3.75; must use actual stored rate 3.74.
   const fxRate = String(u.fxRate ?? '');
-  t.equal(fxRate, '3.74', `applied rate is exactly '3.74' from evidence (got '${fxRate}')`);
+  t.equal(
+    fxRate,
+    '3.74',
+    `applied rate is exactly '3.74' from evidence (got '${fxRate}')`
+  );
 
   const functional = fyo.pesa(String(u.functionalCurrencyAmount ?? 0)).float;
   // 100 USD × 3.74 = 374.00 SAR exactly.
-  t.ok(Math.abs(functional - 374.0) < 0.005, `functional amount is 374.00 SAR, got ${functional}`);
+  t.ok(
+    Math.abs(functional - 374.0) < 0.005,
+    `functional amount is 374.00 SAR, got ${functional}`
+  );
   t.end();
 });
 
@@ -188,8 +260,8 @@ test('E2E: VAT uses source-supplied tax; does not fabricate from gross', async (
   });
 
   t.ok(sarRecords.length > 0, 'SAR order records exist');
-  const record = sarRecords.find((r) =>
-    Math.abs(fyo.pesa(String(r.grossAmount ?? 0)).float - 500.0) < 0.005
+  const record = sarRecords.find(
+    (r) => Math.abs(fyo.pesa(String(r.grossAmount ?? 0)).float - 500.0) < 0.005
   );
   t.ok(record, 'found the 500 SAR order');
 
@@ -209,19 +281,28 @@ test('E2E: VAT uses source-supplied tax; does not fabricate from gross', async (
 // ── Reconciliation: proposals exist and accepted matches succeed ──────────────
 
 test('E2E: Reconciliation proposals generated after import', async (t) => {
-  const proposals = await fyo.db.getAll(ModelNameEnum.DuhGoodsReconciliationMatch, {
-    fields: ['name', 'status', 'confidence'],
-  });
-  t.ok(proposals.length > 0, `at least 1 reconciliation proposal generated (got ${proposals.length})`);
+  const proposals = await fyo.db.getAll(
+    ModelNameEnum.DuhGoodsReconciliationMatch,
+    {
+      fields: ['name', 'status', 'confidence'],
+    }
+  );
+  t.ok(
+    proposals.length > 0,
+    `at least 1 reconciliation proposal generated (got ${proposals.length})`
+  );
   t.end();
 });
 
 test('E2E: Accept proposed matches — zero failures allowed', async (t) => {
   const svc = new DuhGoodsReconciliationService(fyo);
-  const proposed = await fyo.db.getAll(ModelNameEnum.DuhGoodsReconciliationMatch, {
-    filters: { status: 'proposed' },
-    fields: ['name'],
-  });
+  const proposed = await fyo.db.getAll(
+    ModelNameEnum.DuhGoodsReconciliationMatch,
+    {
+      filters: { status: 'proposed' },
+      fields: ['name'],
+    }
+  );
 
   const failures: string[] = [];
   for (const m of proposed) {
@@ -233,13 +314,23 @@ test('E2E: Accept proposed matches — zero failures allowed', async (t) => {
   }
 
   // Hard assertion: every acceptance must succeed.
-  t.equal(failures.length, 0, `all accepts succeeded (failures: ${failures.join('; ')})`);
+  t.equal(
+    failures.length,
+    0,
+    `all accepts succeeded (failures: ${failures.join('; ')})`
+  );
 
-  const accepted = await fyo.db.getAll(ModelNameEnum.DuhGoodsReconciliationMatch, {
-    filters: { status: 'accepted' },
-    fields: ['name'],
-  });
-  t.ok(accepted.length > 0, `at least 1 match accepted (got ${accepted.length})`);
+  const accepted = await fyo.db.getAll(
+    ModelNameEnum.DuhGoodsReconciliationMatch,
+    {
+      filters: { status: 'accepted' },
+      fields: ['name'],
+    }
+  );
+  t.ok(
+    accepted.length > 0,
+    `at least 1 match accepted (got ${accepted.length})`
+  );
   t.end();
 });
 
@@ -279,13 +370,22 @@ test('E2E: Settlement service marks settlement and members as reconciled', async
 // ── Accounting: hard assertion — at least 1 JournalEntry created; balanced ───
 
 test('E2E: Post accepted matches — must create JournalEntries, must be balanced', async (t) => {
-  const accepted = await fyo.db.getAll(ModelNameEnum.DuhGoodsReconciliationMatch, {
-    filters: { status: 'accepted' },
-    fields: ['name'],
-  });
-  t.ok(accepted.length > 0, `have accepted matches to post (got ${accepted.length})`);
+  const accepted = await fyo.db.getAll(
+    ModelNameEnum.DuhGoodsReconciliationMatch,
+    {
+      filters: { status: 'accepted' },
+      fields: ['name'],
+    }
+  );
+  t.ok(
+    accepted.length > 0,
+    `have accepted matches to post (got ${accepted.length})`
+  );
 
-  const postingSvc = new DuhGoodsAccountingPostingService(fyo, await buildAccountMap());
+  const postingSvc = new DuhGoodsAccountingPostingService(
+    fyo,
+    await buildAccountMap()
+  );
   const failures: string[] = [];
   let posted = 0;
 
@@ -299,13 +399,18 @@ test('E2E: Post accepted matches — must create JournalEntries, must be balance
   }
 
   // Hard assertion: at least one posting must succeed.
-  t.ok(posted > 0, `at least 1 posting succeeded (posted: ${posted}, failures: ${failures.length})`);
+  t.ok(
+    posted > 0,
+    `at least 1 posting succeeded (posted: ${posted}, failures: ${failures.length})`
+  );
 
   // Verify all created JournalEntries are balanced (debit == credit).
-  const entries = await fyo.db.getAll(ModelNameEnum.JournalEntry, {
-    filters: {},
-    fields: ['name'],
-  }).catch(() => [] as Record<string, unknown>[]);
+  const entries = await fyo.db
+    .getAll(ModelNameEnum.JournalEntry, {
+      filters: {},
+      fields: ['name'],
+    })
+    .catch(() => [] as Record<string, unknown>[]);
 
   if (entries.length > 0) {
     const JournalEntryAccount = fyo.schemaMap.JournalEntry
@@ -315,21 +420,31 @@ test('E2E: Post accepted matches — must create JournalEntries, must be balance
     if (JournalEntryAccount) {
       let unbalancedCount = 0;
       for (const je of entries) {
-        const accounts = await fyo.db.getAll(ModelNameEnum.AccountingLedgerEntry, {
-          filters: { referenceType: 'JournalEntry', referenceName: je.name as string },
-          fields: ['debit', 'credit'],
-        }).catch(() => [] as Record<string, unknown>[]);
+        const accounts = await fyo.db
+          .getAll(ModelNameEnum.AccountingLedgerEntry, {
+            filters: {
+              referenceType: 'JournalEntry',
+              referenceName: je.name as string,
+            },
+            fields: ['debit', 'credit'],
+          })
+          .catch(() => [] as Record<string, unknown>[]);
 
         if (accounts.length > 0) {
           let totalDebit = 0;
           let totalCredit = 0;
-          for (const a of accounts as unknown as Array<{ debit?: unknown; credit?: unknown }>) {
+          for (const a of accounts as unknown as Array<{
+            debit?: unknown;
+            credit?: unknown;
+          }>) {
             totalDebit += Number(a.debit ?? 0);
             totalCredit += Number(a.credit ?? 0);
           }
           if (Math.abs(totalDebit - totalCredit) > 0.005) {
             unbalancedCount++;
-            t.fail(`JournalEntry ${je.name} is unbalanced: debit=${totalDebit} credit=${totalCredit}`);
+            t.fail(
+              `JournalEntry ${je.name} is unbalanced: debit=${totalDebit} credit=${totalCredit}`
+            );
           }
         }
       }
@@ -350,7 +465,10 @@ test('E2E: balanced=false while proposed (unreviewed) matches exist', async (t) 
   t.equal(typeof summary.balanced, 'boolean', 'balanced is boolean');
   // If there are proposed matches or open items, balanced must be false.
   if (summary.matched > 0 || summary.openItems.length > 0) {
-    t.ok(!summary.balanced, 'balanced is false when proposed matches or open items exist');
+    t.ok(
+      !summary.balanced,
+      'balanced is false when proposed matches or open items exist'
+    );
   }
   t.end();
 });
@@ -376,8 +494,16 @@ test('E2E: Re-importing same data produces zero new records', async (t) => {
   });
 
   // Hard assertion: zero new records on re-import.
-  t.equal(after.length, beforeCount, `zero new records on re-import (before: ${beforeCount}, after: ${after.length})`);
-  t.equal(result.skipped, 8, `all 8 records skipped on re-import (got ${result.skipped})`);
+  t.equal(
+    after.length,
+    beforeCount,
+    `zero new records on re-import (before: ${beforeCount}, after: ${after.length})`
+  );
+  t.equal(
+    result.skipped,
+    8,
+    `all 8 records skipped on re-import (got ${result.skipped})`
+  );
   t.end();
 });
 

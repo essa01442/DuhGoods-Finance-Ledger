@@ -23,8 +23,8 @@ const K = new Uint32Array([
 
 // Initial hash values (first 32 bits of fractional parts of square roots of first 8 primes)
 const H_INIT = new Uint32Array([
-  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-  0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+  0x1f83d9ab, 0x5be0cd19,
 ]);
 
 function rotr32(x: number, n: number): number {
@@ -51,9 +51,10 @@ export function sha256hex(input: string | Uint8Array): string {
   // Pre-processing: padding
   // Message length in bytes → padded to 512-bit (64-byte) boundary
   // Pad: append 0x80, then zeros, then 64-bit big-endian bit length
-  const padLen = bytes.length % 64 < 56
-    ? 64 - (bytes.length % 64)
-    : 128 - (bytes.length % 64);
+  const padLen =
+    bytes.length % 64 < 56
+      ? 64 - (bytes.length % 64)
+      : 128 - (bytes.length % 64);
   const padded = new Uint8Array(bytes.length + padLen);
   padded.set(bytes);
   padded[bytes.length] = 0x80;
@@ -74,8 +75,10 @@ export function sha256hex(input: string | Uint8Array): string {
       w[i] = v.getUint32(blk + i * 4, false);
     }
     for (let i = 16; i < 64; i++) {
-      const s0 = rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^ (w[i - 15] >>> 3);
-      const s1 = rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      const s0 =
+        rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 =
+        rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^ (w[i - 2] >>> 10);
       w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
     }
 
@@ -88,9 +91,13 @@ export function sha256hex(input: string | Uint8Array): string {
       const S0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
       const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
       const temp2 = (S0 + maj) >>> 0;
-      hh = g; g = f; f = e;
+      hh = g;
+      g = f;
+      f = e;
       e = (d + temp1) >>> 0;
-      d = c; c = b; b = a;
+      d = c;
+      c = b;
+      b = a;
       a = (temp1 + temp2) >>> 0;
     }
 

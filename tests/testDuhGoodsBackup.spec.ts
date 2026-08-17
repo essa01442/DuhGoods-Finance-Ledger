@@ -3,7 +3,12 @@ import os from 'os';
 import path from 'path';
 import test from 'tape';
 import { BackupService } from '../duhgoods/backup/BackupService';
-import { closeTestFyo, getTestFyo, getTestDbPath, setupTestFyo } from './helpers';
+import {
+  closeTestFyo,
+  getTestFyo,
+  getTestDbPath,
+  setupTestFyo,
+} from './helpers';
 import setupInstance from 'src/setup/setupInstance';
 import { DatabaseManager } from 'backend/database/manager';
 import { getTestSetupWizardOptions } from './helpers';
@@ -20,8 +25,14 @@ test('BackupService: listBackups - returns empty array for missing dir', (t) => 
 
 test('BackupService: listBackups - lists only duhgoods-backup-*.db files', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-backup-list-'));
-  fs.writeFileSync(path.join(tmpDir, 'duhgoods-backup-2026-07-01T00-00-00.db'), 'fake');
-  fs.writeFileSync(path.join(tmpDir, 'duhgoods-backup-2026-07-02T00-00-00.db'), 'fake2');
+  fs.writeFileSync(
+    path.join(tmpDir, 'duhgoods-backup-2026-07-01T00-00-00.db'),
+    'fake'
+  );
+  fs.writeFileSync(
+    path.join(tmpDir, 'duhgoods-backup-2026-07-02T00-00-00.db'),
+    'fake2'
+  );
   fs.writeFileSync(path.join(tmpDir, 'other-file.db'), 'ignored');
   fs.writeFileSync(path.join(tmpDir, 'duhgoods-backup-notadb.txt'), 'ignored');
 
@@ -30,7 +41,9 @@ test('BackupService: listBackups - lists only duhgoods-backup-*.db files', (t) =
   const list = svc.listBackups(tmpDir);
   t.equal(list.length, 2, 'only 2 matching backup files');
   t.ok(
-    list.every((f) => f.name.startsWith('duhgoods-backup-') && f.name.endsWith('.db')),
+    list.every(
+      (f) => f.name.startsWith('duhgoods-backup-') && f.name.endsWith('.db')
+    ),
     'all entries match pattern'
   );
   fs.rmSync(tmpDir, { recursive: true });
@@ -83,7 +96,11 @@ test('BackupService: createBackup + validateBackup round-trip', async (t) => {
 
     const listed = svc.listBackups(backupDir);
     t.equal(listed.length, 1, 'one backup listed');
-    t.equal(listed[0].path, result.backupPath, 'listed path matches created path');
+    t.equal(
+      listed[0].path,
+      result.backupPath,
+      'listed path matches created path'
+    );
   } finally {
     fs.rmSync(backupDir, { recursive: true, force: true });
   }
@@ -97,7 +114,10 @@ test('BackupService: createBackup - rejects in-memory database', async (t) => {
     await svc.createBackup('/tmp/anywhere');
     t.fail('should have thrown');
   } catch (e) {
-    t.ok(e instanceof Error && e.message.includes('in-memory'), 'rejects in-memory db');
+    t.ok(
+      e instanceof Error && e.message.includes('in-memory'),
+      'rejects in-memory db'
+    );
   }
   t.end();
 });
@@ -108,7 +128,10 @@ test('BackupService: validateBackup - rejects corrupt backup file', (t) => {
     'duhgoods-backup-corrupt.db'
   );
   // Write garbage — not a valid SQLite database.
-  fs.writeFileSync(tmpFile, Buffer.from('this is not a sqlite database', 'utf8'));
+  fs.writeFileSync(
+    tmpFile,
+    Buffer.from('this is not a sqlite database', 'utf8')
+  );
   const fyo = getTestFyo();
   const svc = new BackupService(fyo);
   const result = svc.validateBackup(tmpFile);
@@ -131,7 +154,9 @@ test('BackupService: restore - rejects corrupt backup before touching live DB', 
     'corrupt.db'
   );
   fs.writeFileSync(corruptFile, Buffer.from('garbage', 'utf8'));
-  const safetyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dg-restore-safety-'));
+  const safetyDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'dg-restore-safety-')
+  );
 
   const svc = new BackupService(fyoFile);
   const result = await svc.restore(corruptFile, safetyDir);
@@ -167,7 +192,10 @@ test('BackupService: restore - round-trip restore succeeds for valid backup', as
     // Restore from it — DB is closed and re-opened inside restore().
     const result = await svc.restore(backup.backupPath, safetyDir);
     t.ok(result.ok, `restore succeeded: ${result.message}`);
-    t.ok(result.message.includes('تمت الاستعادة'), 'Arabic success message present');
+    t.ok(
+      result.message.includes('تمت الاستعادة'),
+      'Arabic success message present'
+    );
 
     // Safety backup must exist.
     const safety = svc.listBackups(safetyDir);

@@ -54,9 +54,9 @@ export class VATEngine {
   async getDefaultClassification(
     transactionType: string
   ): Promise<VATClassification> {
-    const policy = await this.fyo.doc.getDoc(
-      ModelNameEnum.DuhGoodsVATPolicy
-    ).catch(() => null);
+    const policy = await this.fyo.doc
+      .getDoc(ModelNameEnum.DuhGoodsVATPolicy)
+      .catch(() => null);
     if (!policy || !policy.enabled) return 'not_applicable';
 
     switch (transactionType) {
@@ -102,9 +102,9 @@ export class VATEngine {
       throw new Error(`Import record ${recordName} not found`);
     }
 
-    const policy = await this.fyo.doc.getDoc(
-      ModelNameEnum.DuhGoodsVATPolicy
-    ).catch(() => null);
+    const policy = await this.fyo.doc
+      .getDoc(ModelNameEnum.DuhGoodsVATPolicy)
+      .catch(() => null);
     if (!policy || !policy.enabled) {
       return {
         classification: 'not_applicable',
@@ -126,12 +126,13 @@ export class VATEngine {
       ? this.fyo.pesa(String(record.taxes))
       : this.fyo.pesa(0);
 
-    let vatAmount = taxes;
-    if (!taxFieldPresent && (
-      classification === 'taxable' ||
-      classification === 'output_vat' ||
-      classification === 'input_vat'
-    )) {
+    const vatAmount = taxes;
+    if (
+      !taxFieldPresent &&
+      (classification === 'taxable' ||
+        classification === 'output_vat' ||
+        classification === 'input_vat')
+    ) {
       // Source did not supply a tax amount for a taxable record — flag for review.
       return { classification: 'review_required', vatAmount: this.fyo.pesa(0) };
     }
@@ -165,9 +166,9 @@ export class VATEngine {
       }
     );
 
-    const policy = await this.fyo.doc.getDoc(
-      ModelNameEnum.DuhGoodsVATPolicy
-    ).catch(() => null);
+    const policy = await this.fyo.doc
+      .getDoc(ModelNameEnum.DuhGoodsVATPolicy)
+      .catch(() => null);
     const pesa = this.fyo.pesa.bind(this.fyo);
 
     let outputVAT = pesa(0);
@@ -185,7 +186,7 @@ export class VATEngine {
       if (classification === 'review_required') {
         reviewRequired++;
         exceptions.push(
-          `Record ${r.name}: VAT classification requires human review`
+          `Record ${String(r.name)}: VAT classification requires human review`
         );
       }
       if (
@@ -214,10 +215,7 @@ export class VATEngine {
         vatAmount,
       });
 
-      if (
-        classification === 'output_vat' ||
-        classification === 'taxable'
-      ) {
+      if (classification === 'output_vat' || classification === 'taxable') {
         outputVAT = outputVAT.add(vatAmount);
       } else if (
         classification === 'input_vat' ||

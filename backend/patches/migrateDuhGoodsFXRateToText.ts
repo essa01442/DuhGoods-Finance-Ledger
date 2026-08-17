@@ -23,8 +23,11 @@ async function execute(dm: DatabaseManager): Promise<void> {
   if (!db) return;
 
   // Check if the table exists.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const tables = db.knex
-    ? await db.knex.raw(`SELECT name FROM sqlite_master WHERE type='table' AND name='DuhGoodsFXRate'`)
+    ? await db.knex.raw(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='DuhGoodsFXRate'`
+      )
     : [];
   if (!tables || (Array.isArray(tables) && tables.length === 0)) return;
 

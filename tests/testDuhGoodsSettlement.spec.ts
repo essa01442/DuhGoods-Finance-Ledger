@@ -69,8 +69,7 @@ test('SettlementService: proposeGroups - exact match for a single member', async
   const proposals = await svc.proposeGroups();
 
   const match = proposals.find(
-    (p) =>
-      p.settlementNet.store === fyo.pesa('100').store && !p.ambiguous
+    (p) => p.settlementNet.store === fyo.pesa('100').store && !p.ambiguous
   );
   t.ok(match, 'found an exact match proposal');
   if (match) {
@@ -107,8 +106,7 @@ test('SettlementService: proposeGroups - flags ambiguous when multiple subsets m
   const svc = new SettlementService(fyo);
   const proposals = await svc.proposeGroups();
   const ambig = proposals.find(
-    (p) =>
-      p.settlementNet.store === fyo.pesa('100').store && p.ambiguous
+    (p) => p.settlementNet.store === fyo.pesa('100').store && p.ambiguous
   );
   t.ok(ambig, 'found ambiguous proposal (multiple subsets)');
   if (ambig) {
@@ -124,13 +122,13 @@ test('SettlementService: acceptGroup - creates reconciliation matches', async (t
   const svc = new SettlementService(fyo);
   const proposals = await svc.proposeGroups();
   const match = proposals.find(
-    (pr) =>
-      pr.settlementNet.store === fyo.pesa('75').store &&
-      !pr.ambiguous
+    (pr) => pr.settlementNet.store === fyo.pesa('75').store && !pr.ambiguous
   );
 
   if (!match) {
-    t.skip('no matching proposal found (may be combined with other pending records)');
+    t.skip(
+      'no matching proposal found (may be combined with other pending records)'
+    );
     t.end();
     return;
   }
@@ -173,7 +171,10 @@ test('SettlementService: acceptGroup - refuses ambiguous proposals', async (t) =
     await svc.acceptGroup(fakeProposal, 'reviewer');
     t.fail('should have thrown for ambiguous proposal');
   } catch (e) {
-    t.ok(e instanceof Error && e.message.includes('ambiguous'), 'refuses ambiguous');
+    t.ok(
+      e instanceof Error && e.message.includes('ambiguous'),
+      'refuses ambiguous'
+    );
   }
   t.end();
 });

@@ -1,6 +1,7 @@
 import test from 'tape';
 import { ModelNameEnum } from 'models/types';
-import { VATEngine, type VATClassification } from '../duhgoods/vat/VATEngine';
+import type { VATClassification } from '../duhgoods/vat/VATEngine';
+import { VATEngine } from '../duhgoods/vat/VATEngine';
 import { closeTestFyo, getTestFyo, setupTestFyo } from './helpers';
 
 const fyo = getTestFyo();
@@ -60,7 +61,11 @@ async function makeRecord(type: string, gross: string, taxes: string = '0') {
 async function enableVAT() {
   try {
     const policy = await fyo.doc.getDoc(ModelNameEnum.DuhGoodsVATPolicy);
-    await policy.setMultiple({ enabled: true, standardRate: 15, functionalCurrency: 'SAR' });
+    await policy.setMultiple({
+      enabled: true,
+      standardRate: 15,
+      functionalCurrency: 'SAR',
+    });
     await policy.sync();
   } catch {
     // policy may not exist in test env
@@ -71,27 +76,39 @@ test('VATEngine: getDefaultClassification - order → taxable when VAT enabled',
   await enableVAT();
   const engine = new VATEngine(fyo);
   const result = await engine.getDefaultClassification('order');
-  t.ok(result === 'taxable' || result === 'not_applicable', `order classification is ${result}`);
+  t.ok(
+    result === 'taxable' || result === 'not_applicable',
+    `order classification is ${result}`
+  );
   t.end();
 });
 
 test('VATEngine: getDefaultClassification - fee → input_vat or not_applicable', async (t) => {
   const engine = new VATEngine(fyo);
   const result = await engine.getDefaultClassification('fee');
-  t.ok(result === 'input_vat' || result === 'not_applicable', `fee classification is ${result}`);
+  t.ok(
+    result === 'input_vat' || result === 'not_applicable',
+    `fee classification is ${result}`
+  );
   t.end();
 });
 
 test('VATEngine: getDefaultClassification - settlement → not_applicable', async (t) => {
   const engine = new VATEngine(fyo);
-  t.equal(await engine.getDefaultClassification('settlement'), 'not_applicable');
+  t.equal(
+    await engine.getDefaultClassification('settlement'),
+    'not_applicable'
+  );
   t.end();
 });
 
 test('VATEngine: getDefaultClassification - unknown type → review_required', async (t) => {
   await enableVAT();
   const engine = new VATEngine(fyo);
-  t.equal(await engine.getDefaultClassification('unknown_type'), 'review_required');
+  t.equal(
+    await engine.getDefaultClassification('unknown_type'),
+    'review_required'
+  );
   t.end();
 });
 
@@ -107,7 +124,9 @@ test('VATEngine: getDefaultClassification - disabled VAT → not_applicable', as
     await policy.set('enabled', true);
     await policy.sync();
   } catch {
-    t.pass('policy not available — VAT engine returns not_applicable by default');
+    t.pass(
+      'policy not available — VAT engine returns not_applicable by default'
+    );
   }
   t.end();
 });
@@ -121,7 +140,11 @@ test('VATEngine: classifyRecord - computes VAT from taxes field', async (t) => {
     `classification is ${classification}`
   );
   if (classification === 'taxable') {
-    t.equal(vatAmount.store, fyo.pesa('15').store, 'vatAmount equals taxes field');
+    t.equal(
+      vatAmount.store,
+      fyo.pesa('15').store,
+      'vatAmount equals taxes field'
+    );
   }
   t.end();
 });
@@ -143,7 +166,9 @@ test('VATEngine: setClassification - rejects invalid classification', async (t) 
     await engine.setClassification(name, 'invalid' as VATClassification);
     t.fail('should have thrown');
   } catch (e) {
-    t.ok(e instanceof Error && e.message.includes('Invalid VAT classification'));
+    t.ok(
+      e instanceof Error && e.message.includes('Invalid VAT classification')
+    );
   }
   t.end();
 });
@@ -161,7 +186,11 @@ test('VATEngine: getPeriodSummary - returns summary without errors', async (t) =
     new Date('2026-07-31T23:59:59.999Z')
   );
 
-  t.equal(typeof summary.reviewRequired, 'number', 'reviewRequired is a number');
+  t.equal(
+    typeof summary.reviewRequired,
+    'number',
+    'reviewRequired is a number'
+  );
   t.ok(Array.isArray(summary.exceptions), 'exceptions is array');
   t.end();
 });

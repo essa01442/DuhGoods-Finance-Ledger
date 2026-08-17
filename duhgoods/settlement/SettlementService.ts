@@ -105,11 +105,20 @@ export class SettlementService {
       const pool =
         sameCurrency.length <= MAX_SUBSET_SIZE
           ? sameCurrency
-          : this.nearestByDate(sameCurrency, settlement.transactionDate, MAX_SUBSET_SIZE);
+          : this.nearestByDate(
+              sameCurrency,
+              settlement.transactionDate,
+              MAX_SUBSET_SIZE
+            );
 
       const target = settlement.netAmount;
       const tolerance = pesa(SETTLEMENT_TOLERANCE);
-      const matchingSets = this.findMatchingSubsets(pool, target, tolerance, pesa);
+      const matchingSets = this.findMatchingSubsets(
+        pool,
+        target,
+        tolerance,
+        pesa
+      );
 
       if (matchingSets.length === 0) {
         continue; // No viable subset — leave for unmatched review
@@ -179,7 +188,10 @@ export class SettlementService {
       const existing = await this.fyo.db.getAll(
         ModelNameEnum.DuhGoodsReconciliationMatch,
         {
-          filters: { leftRecord: member.name, rightRecord: settlementRecord.name },
+          filters: {
+            leftRecord: member.name,
+            rightRecord: settlementRecord.name,
+          },
           fields: ['name'],
           limit: 1,
         }
@@ -212,8 +224,16 @@ export class SettlementService {
         evidenceSnapshot: JSON.stringify({
           groupId: settlementGroupId,
           memberCount: memberRecords.length,
-          member: { name: member.name, type: member.transactionType, amount: member.netAmount.store },
-          settlement: { name: settlementRecord.name, type: settlementRecord.transactionType, amount: settlementRecord.netAmount.store },
+          member: {
+            name: member.name,
+            type: member.transactionType,
+            amount: member.netAmount.store,
+          },
+          settlement: {
+            name: settlementRecord.name,
+            type: settlementRecord.transactionType,
+            amount: settlementRecord.netAmount.store,
+          },
           delta: proposal.delta.store,
           confidence: proposal.confidence,
         }),
@@ -285,7 +305,10 @@ export class SettlementService {
         pesa(0)
       );
       const maxPossible = sum.add(remainingSum);
-      if (target.sub(maxPossible).abs().gt(tolerance) && maxPossible.lt(target)) {
+      if (
+        target.sub(maxPossible).abs().gt(tolerance) &&
+        maxPossible.lt(target)
+      ) {
         return; // can't reach target
       }
       for (let i = index; i < candidates.length; i++) {

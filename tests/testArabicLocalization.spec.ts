@@ -47,6 +47,7 @@ const ALLOWLIST = new Set([
   // DuhGoods: Arabic UI strings that legitimately embed untranslatable technical names
   'ملف WooCommerce',
   'ملف مزود الدفع (PSP)',
+  'يرجى تحديد عملة كشف الحساب البنكي (مثال: SAR، USD)',
 ]);
 
 // Narrow list of known incorrect lexical/orthographic forms for quality regression check

@@ -121,7 +121,10 @@ test('FXService: storeManualRate - rejects zero/negative rate', async (t) => {
     });
     t.fail('should have thrown');
   } catch (e) {
-    t.ok(e instanceof Error && e.message.includes('positive'), 'rejects zero rate');
+    t.ok(
+      e instanceof Error && e.message.includes('positive'),
+      'rejects zero rate'
+    );
   }
   t.end();
 });
@@ -186,9 +189,16 @@ test('FXService: convert - returns FXConversionResult when rate available', asyn
     'SAR',
     new Date('2026-07-05')
   );
-  t.ok(!svc.isMissingRateException(result), 'result is conversion, not exception');
+  t.ok(
+    !svc.isMissingRateException(result),
+    'result is conversion, not exception'
+  );
   if (!svc.isMissingRateException(result)) {
-    t.equal(result.functionalAmount.store, fyo.pesa('375').store, '100 USD = 375 SAR');
+    t.equal(
+      result.functionalAmount.store,
+      fyo.pesa('375').store,
+      '100 USD = 375 SAR'
+    );
   }
   t.end();
 });
@@ -240,8 +250,20 @@ test('FXService: applyToRecord - sets fxReviewNote when rate missing', async (t)
 test('FXService: importFromJSON - imports multiple rates idempotently', async (t) => {
   const svc = new FXService(fyo);
   const content = JSON.stringify([
-    { date: '2026-06-01', base: 'USD', quote: 'SAR', rate: 3.75, source: 'June import' },
-    { date: '2026-06-02', base: 'USD', quote: 'SAR', rate: 3.76, source: 'June import' },
+    {
+      date: '2026-06-01',
+      base: 'USD',
+      quote: 'SAR',
+      rate: 3.75,
+      source: 'June import',
+    },
+    {
+      date: '2026-06-02',
+      base: 'USD',
+      quote: 'SAR',
+      rate: 3.76,
+      source: 'June import',
+    },
   ]);
   const r1 = await svc.importFromJSON(content);
   t.equal(r1.imported, 2, 'imported 2 rates');

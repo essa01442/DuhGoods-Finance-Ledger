@@ -51,7 +51,11 @@ export class BackupService {
     const backupPath = path.join(backupDir, backupFileName);
 
     // Use VACUUM INTO for a consistent copy without requiring exclusive lock.
-    const knex = (this.fyo.db as unknown as { knex: { raw: (sql: string, ...args: unknown[]) => Promise<unknown> } }).knex;
+    const knex = (
+      this.fyo.db as unknown as {
+        knex: { raw: (sql: string, ...args: unknown[]) => Promise<unknown> };
+      }
+    ).knex;
     if (knex) {
       await knex.raw(`VACUUM INTO ?`, [backupPath]);
     } else {
@@ -78,22 +82,31 @@ export class BackupService {
     try {
       // Dynamic require so this doesn't break non-Electron environments.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Database = require('better-sqlite3') as new (path: string, opts?: unknown) => {
+      const Database = require('better-sqlite3') as new (
+        path: string,
+        opts?: unknown
+      ) => {
         pragma: (sql: string) => unknown[];
         close: () => void;
       };
       const db = new Database(backupPath, { readonly: true });
-      const result = db.pragma('integrity_check') as { integrity_check: string }[];
+      const result = db.pragma('integrity_check') as {
+        integrity_check: string;
+      }[];
       db.close();
       const ok = result.length === 1 && result[0]?.integrity_check === 'ok';
       return {
         valid: ok,
-        message: ok ? 'Backup integrity check passed' : `Integrity check failed: ${JSON.stringify(result)}`,
+        message: ok
+          ? 'Backup integrity check passed'
+          : `Integrity check failed: ${JSON.stringify(result)}`,
       };
     } catch (e) {
       return {
         valid: false,
-        message: `Failed to open backup: ${e instanceof Error ? e.message : String(e)}`,
+        message: `Failed to open backup: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
       };
     }
   }
@@ -101,7 +114,9 @@ export class BackupService {
   /**
    * Lists available backup files in a directory, sorted by newest first.
    */
-  listBackups(backupDir: string): Array<{ name: string; path: string; sizeBytes: number; mtime: Date }> {
+  listBackups(
+    backupDir: string
+  ): Array<{ name: string; path: string; sizeBytes: number; mtime: Date }> {
     if (!fs.existsSync(backupDir)) return [];
     return fs
       .readdirSync(backupDir)
@@ -136,13 +151,19 @@ export class BackupService {
   ): Promise<RestoreResult> {
     const dbPath = this.fyo.db.dbPath;
     if (!dbPath || dbPath === ':memory:') {
-      return { ok: false, message: 'النسخ الاحتياطي للذاكرة غير مدعوم للاستعادة' };
+      return {
+        ok: false,
+        message: 'النسخ الاحتياطي للذاكرة غير مدعوم للاستعادة',
+      };
     }
 
     // Step 1: Validate backup.
     const validation = this.validateBackup(backupPath);
     if (!validation.valid) {
-      return { ok: false, message: `فشل التحقق من النسخة الاحتياطية: ${validation.message}` };
+      return {
+        ok: false,
+        message: `فشل التحقق من النسخة الاحتياطية: ${validation.message}`,
+      };
     }
 
     // Step 2: Safety backup of current live DB.
@@ -153,7 +174,9 @@ export class BackupService {
     } catch (e) {
       return {
         ok: false,
-        message: `فشل إنشاء النسخة الاحتياطية الأمنية: ${e instanceof Error ? e.message : String(e)}`,
+        message: `فشل إنشاء النسخة الاحتياطية الأمنية: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
       };
     }
 
@@ -163,7 +186,9 @@ export class BackupService {
     } catch (e) {
       return {
         ok: false,
-        message: `فشل إغلاق قاعدة البيانات: ${e instanceof Error ? e.message : String(e)}. النسخة الاحتياطية الأمنية: ${safetyPath}`,
+        message: `فشل إغلاق قاعدة البيانات: ${
+          e instanceof Error ? e.message : String(e)
+        }. النسخة الاحتياطية الأمنية: ${safetyPath}`,
       };
     }
 
@@ -181,10 +206,16 @@ export class BackupService {
         // Safety backup restoration also failed; DB may be in inconsistent state.
       }
       // Clean up temp file if it exists.
-      try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        /* ignore */
+      }
       return {
         ok: false,
-        message: `فشل استبدال قاعدة البيانات: ${e instanceof Error ? e.message : String(e)}. النسخة الاحتياطية الأمنية: ${safetyPath}`,
+        message: `فشل استبدال قاعدة البيانات: ${
+          e instanceof Error ? e.message : String(e)
+        }. النسخة الاحتياطية الأمنية: ${safetyPath}`,
       };
     }
 
