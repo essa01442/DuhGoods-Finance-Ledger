@@ -288,10 +288,15 @@ test('accounting posting: blocks unaccepted and superseded reconciliation eviden
     ModelNameEnum.DuhGoodsAccountingPosting,
     {
       filters: { reconciliationMatch: unaccepted.match.name! },
-      fields: ['name', 'auditHistory'],
+      fields: ['name', 'status', 'auditHistory'],
     }
   );
   t.equal(historicalException.length, 1, 'unaccepted attempt is recorded');
+  t.equal(
+    historicalException[0].status,
+    'exception',
+    'unaccepted attempt row has exception status'
+  );
   const unacceptedMatch = await fyo.doc.getDoc(
     ModelNameEnum.DuhGoodsReconciliationMatch,
     unaccepted.match.name!
@@ -299,10 +304,10 @@ test('accounting posting: blocks unaccepted and superseded reconciliation eviden
   await unacceptedMatch.set('status', 'accepted');
   await unacceptedMatch.sync();
   const acceptedPostingName = await service.post(unaccepted.match.name!);
-  t.equal(
+  t.notEqual(
     acceptedPostingName,
     historicalException[0].name,
-    'accepted retry reuses the auditable exception record'
+    'accepted retry creates a fresh posting row, not reusing the exception record'
   );
   t.equal(
     await service.post(unaccepted.match.name!),
@@ -322,10 +327,23 @@ test('accounting posting: blocks unaccepted and superseded reconciliation eviden
     ModelNameEnum.DuhGoodsAccountingPosting,
     acceptedPostingName
   );
+  t.equal(
+    acceptedPosting.status,
+    'posted',
+    'accepted posting row has posted status'
+  );
+  const preservedExceptionRow = await fyo.db.get(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    historicalException[0].name as string
+  );
+  t.equal(
+    preservedExceptionRow.status,
+    'exception',
+    'exception row preserved as historical evidence after successful retry'
+  );
   t.ok(
-    (acceptedPosting.auditHistory as string).includes('unaccepted_match') &&
-      (acceptedPosting.auditHistory as string).includes('accepted_for_posting'),
-    'historical exception remains in append-only audit history'
+    (preservedExceptionRow.auditHistory as string).includes('unaccepted_match'),
+    'exception row audit history captures the unaccepted attempt'
   );
 
   const superseded = await fixture(
@@ -506,6 +524,137 @@ test('accounting posting: recovers a persisted reservation without duplicate jou
       'audit history replacement is rejected'
     );
   }
+  t.end();
+});
+
+test('accounting posting scenario 1: exception row remains auditable after accepted retry', async (t) => {
+  const service = await postingService();
+  const { match } = await fixture(
+    { sourceType: 'woocommerce', type: 'order', amount: '50' },
+    { sourceType: 'psp_export', type: 'payment', amount: '50' },
+    'proposed'
+  );
+  // Step 1: posting attempt on proposed match — rejected, exception row created.
+  try {
+    await service.post(match.name!);
+  } catch {
+    /* expected */
+  }
+  const noJournals = await fyo.db.getAll(ModelNameEnum.JournalEntry, {
+    filters: { referenceNumber: `DuhGoods:${match.name}` },
+    fields: ['name'],
+  });
+  t.equal(noJournals.length, 0, 'no JournalEntry after failed first attempt');
+  // Step 2: accept the match.
+  const matchDoc = await fyo.doc.getDoc(
+    ModelNameEnum.DuhGoodsReconciliationMatch,
+    match.name!
+  );
+  await matchDoc.set('status', 'accepted');
+  await matchDoc.sync();
+  // Step 3: retry succeeds, returns a NEW posting name (not the exception row).
+  const postingName = await service.post(match.name!);
+  // Step 4: idempotent — repeated call returns the same name.
+  t.equal(
+    await service.post(match.name!),
+    postingName,
+    'posting is idempotent after success'
+  );
+  // Two rows exist: one exception (historical), one posted (active).
+  const allRows = await fyo.db.getAll(ModelNameEnum.DuhGoodsAccountingPosting, {
+    filters: { reconciliationMatch: match.name! },
+    fields: ['name', 'status', 'idempotencyKey'],
+  });
+  const exceptionRows = allRows.filter((r) => r.status === 'exception');
+  const postedRows = allRows.filter((r) => r.status === 'posted');
+  t.equal(allRows.length, 2, 'both exception and posted rows exist');
+  t.equal(exceptionRows.length, 1, 'exactly one exception row preserved');
+  t.equal(postedRows.length, 1, 'exactly one posted row');
+  t.equal(postedRows[0].name, postingName, 'posted row matches returned name');
+  // Exactly one JournalEntry.
+  const journals = await fyo.db.getAll(ModelNameEnum.JournalEntry, {
+    filters: { referenceNumber: `DuhGoods:${match.name}` },
+    fields: ['name'],
+  });
+  t.equal(
+    journals.length,
+    1,
+    'exactly one JournalEntry created after accepted retry'
+  );
+  await assertBalanced(t, postingName, 'scenario 1 accepted retry');
+  t.end();
+});
+
+test('accounting posting scenario 2: crash-recovery revalidation failure leaves no stranded reserving rows', async (t) => {
+  const service = await postingService();
+  // Create an accepted match with supersede-able evidence.
+  const { match, leftRecord } = await fixture(
+    {
+      sourceType: 'woocommerce',
+      type: 'order',
+      amount: '30',
+      options: { identityKey: 'scenario2-order' },
+    },
+    { sourceType: 'psp_export', type: 'payment', amount: '30' }
+  );
+  // Plant a 'reserving' row simulating a crash before the JournalEntry was created.
+  const crashedReservation = fyo.doc.getNewDoc(
+    ModelNameEnum.DuhGoodsAccountingPosting
+  );
+  await crashedReservation.setMultiple({
+    reconciliationMatch: match.name,
+    idempotencyKey: `${match.name}:${
+      leftRecord.evidenceHash as string
+    }:SCENARIO2`,
+    postingType: 'order_payment',
+    status: 'reserving',
+    evidenceSnapshot: '[]',
+    accountSnapshot: '{}',
+    auditHistory: JSON.stringify([
+      { action: 'reserved', at: new Date().toISOString() },
+    ]),
+  });
+  await crashedReservation.sync();
+  // Supersede the left evidence before crash-recovery runs.
+  await record(
+    leftRecord.importSource as string,
+    'order',
+    'woocommerce',
+    '30',
+    { identityKey: 'scenario2-order', evidenceVersion: 2 }
+  );
+  // Crash-recovery re-validates evidence, finds it superseded, must not strand.
+  try {
+    await service.post(match.name!);
+    t.fail('superseded evidence during crash recovery must not post');
+  } catch (error) {
+    t.ok(
+      (error as Error).message.includes('superseded'),
+      `crash-recovery throws on superseded evidence: "${
+        (error as Error).message
+      }"`
+    );
+  }
+  // No rows left stuck in 'reserving'.
+  const reservingRows = await fyo.db.getAll(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    {
+      filters: { reconciliationMatch: match.name! },
+      fields: ['name', 'status'],
+    }
+  );
+  const stranded = reservingRows.filter((r) => r.status === 'reserving');
+  t.equal(stranded.length, 0, 'no rows left stranded in reserving state');
+  // The crashed reservation row should now be exception.
+  const crashedRow = await fyo.db.get(
+    ModelNameEnum.DuhGoodsAccountingPosting,
+    crashedReservation.name as string
+  );
+  t.equal(
+    crashedRow.status,
+    'exception',
+    'crashed reservation transitioned to exception by markReservationFailed()'
+  );
   t.end();
 });
 

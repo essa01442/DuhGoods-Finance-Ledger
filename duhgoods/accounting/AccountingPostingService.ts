@@ -58,19 +58,24 @@ export class DuhGoodsAccountingPostingService {
   private async postInternal(matchName: string): Promise<string> {
     const existing = await this.findPosting(matchName);
     if (existing) {
-      if (existing.status === 'exception') {
-        const match = await this.fyo.db.get(
-          ModelNameEnum.DuhGoodsReconciliationMatch,
-          matchName
-        );
-        if (match.status !== 'accepted')
-          throw new Error(existing.exceptionMessage as string);
-        return this.reopenAcceptedException(existing);
-      }
       if (existing.status === 'posted') return existing.name as string;
-      return this.resume(existing);
+      // Existing non-exception row in 'reserving' state: attempt crash-recovery.
+      try {
+        return await this.resume(existing);
+      } catch (error) {
+        if (error instanceof PostingException) {
+          // Transition the stranded 'reserving' row to 'exception'; no row
+          // stays stuck in 'reserving' and the failure is fully auditable.
+          await this.markReservationFailed(existing, error);
+          throw new Error(error.message);
+        }
+        throw error;
+      }
     }
 
+    // No active (non-exception) posting row exists.
+    // Exception rows (from prior failed attempts) are preserved as historical
+    // evidence and a fresh posting lifecycle row is created below.
     const match = await this.fyo.db.get(
       ModelNameEnum.DuhGoodsReconciliationMatch,
       matchName
@@ -182,21 +187,27 @@ export class DuhGoodsAccountingPostingService {
       ModelNameEnum.JournalEntry,
       posting.journalEntry as string
     );
+    // journal.cancel() marks the JournalEntry as cancelled and creates reverse
+    // AccountingLedgerEntries via afterCancel().  There is no separate reversal
+    // JournalEntry — reversalJournalEntry is intentionally left unset.
     await journal.cancel();
     await posting.setMultiple({
       status: 'reversed',
-      reversalJournalEntry: posting.journalEntry as string,
       auditHistory: appendAudit(posting.auditHistory as string, 'reversed'),
     });
     await posting.sync();
   }
 
+  /** Returns the first active (non-exception) posting row for a match. */
   private async findPosting(
     matchName: string
   ): Promise<Record<string, unknown> | undefined> {
     return (
       await this.fyo.db.getAll(ModelNameEnum.DuhGoodsAccountingPosting, {
-        filters: { reconciliationMatch: matchName },
+        filters: {
+          reconciliationMatch: matchName,
+          status: ['!=', 'exception'] as unknown as string,
+        },
         fields: [
           'name',
           'status',
@@ -208,6 +219,7 @@ export class DuhGoodsAccountingPostingService {
       })
     )[0];
   }
+
   private async resume(posting: Record<string, unknown>): Promise<string> {
     const journal = posting.journalEntry
       ? await this.fyo.doc.getDoc(
@@ -229,6 +241,7 @@ export class DuhGoodsAccountingPostingService {
         ModelNameEnum.DuhGoodsReconciliationMatch,
         matchName
       );
+      // Re-validate evidence — throws PostingException on superseded / invalid evidence.
       const evidence = await this.getCurrentEvidence(match);
       this.requireFunctionalCurrency(evidence);
       const postingType = relation(evidence);
@@ -281,28 +294,34 @@ export class DuhGoodsAccountingPostingService {
     await reservation.sync();
     return reservation.name as string;
   }
-  private async reopenAcceptedException(
-    posting: Record<string, unknown>
-  ): Promise<string> {
-    const exception = await this.fyo.doc.getDoc(
+
+  /**
+   * Transition a stranded 'reserving' row to 'exception'.
+   * Called when crash-recovery revalidation fails with a PostingException so
+   * that no row is left stuck in 'reserving'.  The original posting facts
+   * (idempotencyKey, postingType, evidenceSnapshot) are preserved immutably.
+   */
+  private async markReservationFailed(
+    posting: Record<string, unknown>,
+    error: PostingException
+  ): Promise<void> {
+    const reservation = await this.fyo.doc.getDoc(
       ModelNameEnum.DuhGoodsAccountingPosting,
       posting.name as string,
       { skipDocumentCache: true }
     );
-    await exception.setMultiple({
-      status: 'reserving',
+    await reservation.setMultiple({
+      status: 'exception',
+      exceptionCode: error.code,
+      exceptionMessage: error.message,
       auditHistory: appendAudit(
-        exception.auditHistory as string,
-        'accepted_for_posting'
+        reservation.auditHistory as string,
+        `exception:${error.code}`
       ),
     });
-    await exception.sync();
-    return this.resume({
-      ...posting,
-      status: 'reserving',
-      reconciliationMatch: exception.reconciliationMatch,
-    });
+    await reservation.sync();
   }
+
   private async findJournal(referenceNumber: string) {
     const rows = await this.fyo.db.getAll(ModelNameEnum.JournalEntry, {
       filters: { referenceNumber },
@@ -315,6 +334,7 @@ export class DuhGoodsAccountingPostingService {
       rows[0].name as string
     );
   }
+
   private requireFunctionalCurrency(evidence: Evidence[]): void {
     const functionalCurrency = this.fyo.singles.SystemSettings?.currency;
     if (
@@ -332,8 +352,6 @@ export class DuhGoodsAccountingPostingService {
     code: string,
     message: string
   ): Promise<string> {
-    const existing = await this.findPosting(matchName);
-    if (existing) throw new Error(existing.exceptionMessage as string);
     const posting = this.fyo.doc.getNewDoc(
       ModelNameEnum.DuhGoodsAccountingPosting
     );
@@ -354,6 +372,8 @@ export class DuhGoodsAccountingPostingService {
       await posting.sync();
     } catch (error) {
       if (!isDuplicatePosting(error)) throw error;
+      // Another concurrent call already recorded the exception; ignore the
+      // duplicate and surface the error message to the caller.
     }
     throw new Error(message);
   }
@@ -595,7 +615,9 @@ function moneyFact(value: unknown, fyo: Fyo): Money | undefined {
       'missing_fact',
       'Shipping and discount facts must be numeric'
     );
-  return fyo.pesa(value);
+  // Always convert to string to prevent JS Number precision loss on JSON-parsed
+  // numeric values (e.g. shipping_total: 10.25 from a WooCommerce JSON export).
+  return fyo.pesa(String(value));
 }
 function relation(rows: Evidence[]): string {
   const types = new Set(

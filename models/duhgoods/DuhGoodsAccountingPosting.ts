@@ -8,6 +8,15 @@ const IMMUTABLE = [
   'accountSnapshot',
 ] as const;
 
+// Valid status transitions enforced at model level.
+const VALID_TRANSITIONS: Readonly<Record<string, readonly string[]>> = {
+  reserving: ['reserving', 'posted', 'exception'],
+  posted: ['posted', 'reversing'],
+  reversing: ['reversing', 'reversed'],
+  reversed: ['reversed'],
+  exception: ['exception'],
+};
+
 export class DuhGoodsAccountingPosting extends Doc {
   reconciliationMatch?: string;
   idempotencyKey?: string;
@@ -18,10 +27,14 @@ export class DuhGoodsAccountingPosting extends Doc {
   evidenceSnapshot?: string;
   accountSnapshot?: string;
   auditHistory?: string;
+  exceptionCode?: string;
+  exceptionMessage?: string;
 
   override async beforeSync(): Promise<void> {
     if (this.notInserted) return;
     const stored = await this.fyo.db.get(this.schemaName, this.name as string);
+
+    // Enforce immutable fields.
     for (const field of IMMUTABLE) {
       if (
         String(stored[field] ?? '') !==
@@ -29,17 +42,32 @@ export class DuhGoodsAccountingPosting extends Doc {
       ) {
         throw new Error(`DuhGoodsAccountingPosting: "${field}" is immutable`);
       }
-      if (stored.journalEntry && stored.journalEntry !== this.journalEntry) {
+    }
+
+    // journalEntry is immutable once set (check outside the IMMUTABLE loop).
+    if (stored.journalEntry && stored.journalEntry !== this.journalEntry) {
+      throw new Error(
+        'DuhGoodsAccountingPosting: "journalEntry" is immutable once set'
+      );
+    }
+
+    // Enforce lifecycle transitions.
+    const oldStatus = stored.status as string | undefined;
+    const newStatus = this.status;
+    if (
+      oldStatus !== undefined &&
+      newStatus !== undefined &&
+      oldStatus !== newStatus
+    ) {
+      const allowed = VALID_TRANSITIONS[oldStatus] ?? [];
+      if (!allowed.includes(newStatus)) {
         throw new Error(
-          'DuhGoodsAccountingPosting: "journalEntry" is immutable once set'
+          `DuhGoodsAccountingPosting: invalid status transition from "${oldStatus}" to "${newStatus}"`
         );
       }
     }
-    if (stored.status === 'reversed' && this.status !== 'reversed') {
-      throw new Error(
-        'DuhGoodsAccountingPosting: a reversal cannot be reopened'
-      );
-    }
+
+    // Audit history may only be appended (one entry at a time).
     const oldHistory = String(stored.auditHistory ?? '');
     const newHistory = String(this.auditHistory ?? '');
     if (oldHistory !== newHistory) {

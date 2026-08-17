@@ -128,9 +128,9 @@ test('file-backed: accounting posting migration creates unique constraints and r
   );
   t.ok(
     indexes.some(
-      (index) => index.name === 'idx_dghap_match' && index.unique === 1
+      (index) => index.name === 'idx_dghap_active_match' && index.unique === 1
     ),
-    'reconciliation match has a unique database constraint'
+    'reconciliation match has a partial unique database constraint (non-exception rows only)'
   );
   const trigger = (await rawDm.db!.knex!('sqlite_master')
     .where({ type: 'trigger', name: 'dghap_claim_reversal_once' })
