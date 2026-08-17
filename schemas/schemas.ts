@@ -87,6 +87,7 @@ import ItemEnquiry from './app/ItemEnquiry.json';
 import DuhGoodsImportSource from './app/duhgoods/DuhGoodsImportSource.json';
 import DuhGoodsImportRecord from './app/duhgoods/DuhGoodsImportRecord.json';
 import DuhGoodsReconciliationMatch from './app/duhgoods/DuhGoodsReconciliationMatch.json';
+import DuhGoodsAccountingPosting from './app/duhgoods/DuhGoodsAccountingPosting.json';
 
 export const coreSchemas: Schema[] = [
   PatchRun as Schema,
@@ -204,4 +205,5 @@ export const appSchemas: Schema[] | SchemaStub[] = [
   DuhGoodsImportSource as Schema,
   DuhGoodsImportRecord as Schema,
   DuhGoodsReconciliationMatch as Schema,
+  DuhGoodsAccountingPosting as Schema,
 ];

@@ -118,6 +118,30 @@ test('file-backed: reopen DB with raw DatabaseManager for direct PRAGMA access',
   t.end();
 });
 
+test('file-backed: accounting posting migration creates unique constraints and reversal claim trigger', async (t) => {
+  const indexes = await getIndexList(rawDm, 'DuhGoodsAccountingPosting');
+  t.ok(
+    indexes.some(
+      (index) => index.name === 'idx_dghap_idempotency' && index.unique === 1
+    ),
+    'idempotency key has a unique database constraint'
+  );
+  t.ok(
+    indexes.some(
+      (index) => index.name === 'idx_dghap_active_match' && index.unique === 1
+    ),
+    'reconciliation match has a partial unique database constraint (non-exception rows only)'
+  );
+  const trigger = (await rawDm.db!.knex!('sqlite_master')
+    .where({ type: 'trigger', name: 'dghap_claim_reversal_once' })
+    .first()) as { sql?: string } | undefined;
+  t.ok(
+    trigger?.sql?.includes("NEW.status = 'reversing'"),
+    'database trigger atomically claims one reversal'
+  );
+  t.end();
+});
+
 // ---------- table column existence -------------------------------------------
 
 test('file-backed: DuhGoodsImportSource has all Round-3 columns', async (t) => {
