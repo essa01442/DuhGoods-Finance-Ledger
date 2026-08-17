@@ -1,4 +1,5 @@
 import type { Fyo } from 'fyo';
+import { p } from 'pesa';
 import type { Money } from 'pesa';
 import { ModelNameEnum } from 'models/types';
 import { computeEvidenceHash } from '../evidence/EvidenceManager';
@@ -8,9 +9,12 @@ export interface FXRateEvidence {
   effectiveDate: Date;
   baseCurrency: string;
   quoteCurrency: string;
-  rate: number;
+  /** Exact decimal string — NEVER a JS number (binary floats corrupt rates). */
+  rate: string;
   sourceDescription: string;
   origin: string;
+  /** True when this rate was derived by inverting a stored inverse-pair rate. */
+  derived?: boolean;
 }
 
 export interface FXConversionResult {
@@ -18,9 +22,12 @@ export interface FXConversionResult {
   sourceCurrency: string;
   functionalAmount: Money;
   functionalCurrency: string;
-  rate: number;
+  /** Exact decimal string of the rate actually applied. */
+  rate: string;
   rateEvidenceName: string;
   rateEffectiveDate: Date;
+  /** True when the applied rate was derived from an inverse-pair record. */
+  rateDerived?: boolean;
 }
 
 export interface FXMissingRateException {
@@ -28,6 +35,33 @@ export interface FXMissingRateException {
   functionalCurrency: string;
   transactionDate: Date;
   message: string;
+}
+
+/** Precision (decimal places) used for exact rate arithmetic. */
+const RATE_PRECISION = 18;
+
+/** Strict decimal grammar — rejects scientific notation, hex, NaN, Infinity. */
+const DECIMAL_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+
+/**
+ * Normalizes an unknown value into an exact decimal string.
+ * Returns null when the value is not a finite plain decimal.
+ * Numbers are converted via toString() and must still satisfy the grammar —
+ * scientific-notation output (e.g. 1e-7) is rejected.
+ */
+export function toDecimalString(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const str = String(value).trim();
+  if (!DECIMAL_RE.test(str)) return null;
+  return str;
+}
+
+/**
+ * Exact inverse of a decimal rate: 1 / rate at RATE_PRECISION decimal places.
+ * Uses PreciseNumber (arbitrary-precision decimal) — never JS float division.
+ */
+export function invertRate(rate: string): string {
+  return p('1', RATE_PRECISION).div(p(rate, RATE_PRECISION)).toString();
 }
 
 /**
@@ -56,7 +90,7 @@ export class FXService {
         effectiveDate: transactionDate,
         baseCurrency,
         quoteCurrency,
-        rate: 1,
+        rate: '1',
         sourceDescription: 'Identity rate (same currency)',
         origin: 'manual_entry',
       };
@@ -90,27 +124,33 @@ export class FXService {
       });
       if (inverseRows.length > 0) {
         const r = inverseRows[0];
-        const inverseRate = 1 / (r.rate as number);
+        const storedRate = toDecimalString(r.rate);
+        if (!storedRate || p(storedRate, RATE_PRECISION).isZero()) {
+          return null;
+        }
         return {
           name: r.name as string,
           effectiveDate: r.effectiveDate as Date,
           baseCurrency,
           quoteCurrency,
-          rate: inverseRate,
-          sourceDescription: `Inverse of: ${r.sourceDescription}`,
+          rate: invertRate(storedRate),
+          sourceDescription: `Derived (inverse of): ${r.sourceDescription}`,
           origin: r.origin as string,
+          derived: true,
         };
       }
       return null;
     }
 
     const r = rows[0];
+    const rate = toDecimalString(r.rate);
+    if (!rate) return null;
     return {
       name: r.name as string,
       effectiveDate: r.effectiveDate as Date,
       baseCurrency: r.baseCurrency as string,
       quoteCurrency: r.quoteCurrency as string,
-      rate: r.rate as number,
+      rate,
       sourceDescription: r.sourceDescription as string,
       origin: r.origin as string,
     };
@@ -142,8 +182,7 @@ export class FXService {
     }
 
     const pesa = this.fyo.pesa.bind(this.fyo);
-    const rateStr = evidence.rate.toString();
-    const functionalAmount = sourceAmount.mul(pesa(rateStr));
+    const functionalAmount = sourceAmount.mul(pesa(evidence.rate));
 
     return {
       sourceAmount,
@@ -153,6 +192,7 @@ export class FXService {
       rate: evidence.rate,
       rateEvidenceName: evidence.name,
       rateEffectiveDate: evidence.effectiveDate,
+      rateDerived: evidence.derived,
     };
   }
 
@@ -187,7 +227,7 @@ export class FXService {
       );
       await doc.setMultiple({
         functionalCurrencyAmount: doc.netAmount as never,
-        fxRate: 1,
+        fxRate: '1',
         fxRateRef: undefined,
       });
       await doc.sync();
@@ -235,11 +275,13 @@ export class FXService {
     effectiveDate: Date;
     baseCurrency: string;
     quoteCurrency: string;
-    rate: number;
+    /** Exact decimal string (plain number input is normalized and validated). */
+    rate: string | number;
     sourceDescription: string;
   }): Promise<{ name: string; created: boolean }> {
-    if (opts.rate <= 0) {
-      throw new Error('FX rate must be positive');
+    const rate = toDecimalString(opts.rate);
+    if (!rate || !p(rate, RATE_PRECISION).isPositive()) {
+      throw new Error('FX rate must be a positive exact decimal');
     }
     if (!opts.baseCurrency || !opts.quoteCurrency) {
       throw new Error('FX rate requires both base and quote currency');
@@ -253,7 +295,7 @@ export class FXService {
       effectiveDate: dateStr,
       baseCurrency: opts.baseCurrency,
       quoteCurrency: opts.quoteCurrency,
-      rate: opts.rate,
+      rate,
       sourceDescription: opts.sourceDescription,
     });
 
@@ -276,7 +318,7 @@ export class FXService {
       effectiveDate: opts.effectiveDate,
       baseCurrency: opts.baseCurrency,
       quoteCurrency: opts.quoteCurrency,
-      rate: opts.rate,
+      rate,
       sourceDescription: opts.sourceDescription,
       origin: 'manual_entry',
       evidenceHash,
@@ -315,7 +357,7 @@ export class FXService {
         const dateStr = String(row.date ?? '');
         const base = String(row.base ?? '');
         const quote = String(row.quote ?? '');
-        const rate = parseFloat(String(row.rate ?? 'NaN'));
+        const rate = toDecimalString(row.rate);
         const source = String(row.source ?? 'Imported file');
 
         if (!dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
@@ -324,8 +366,8 @@ export class FXService {
         if (!base || !quote) {
           throw new Error(`Row ${i}: base and quote currencies are required`);
         }
-        if (isNaN(rate) || rate <= 0) {
-          throw new Error(`Row ${i}: rate must be a positive number`);
+        if (!rate || !p(rate, RATE_PRECISION).isPositive()) {
+          throw new Error(`Row ${i}: rate must be a positive exact decimal`);
         }
 
         const effectiveDate = new Date(dateStr + 'T00:00:00Z');

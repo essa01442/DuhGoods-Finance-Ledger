@@ -162,8 +162,8 @@
     },
     {
       "fieldname": "fxRate",
-      "label": "FX Rate Applied",
-      "fieldtype": "Float",
+      "label": "FX Rate Applied (exact decimal string)",
+      "fieldtype": "Data",
       "section": "FX"
     },
     {

@@ -61,7 +61,7 @@ test('FXService: findRate - identity rate for same currency', async (t) => {
   const svc = new FXService(fyo);
   const result = await svc.findRate('SAR', 'SAR', new Date('2026-07-01'));
   t.ok(result, 'result not null');
-  t.equal(result!.rate, 1, 'identity rate is 1');
+  t.equal(result!.rate, '1', 'identity rate is exact decimal "1"');
   t.equal(result!.name, '__identity__');
   t.end();
 });
@@ -145,7 +145,7 @@ test('FXService: findRate - uses most recent rate on or before date', async (t) 
 
   const result = await svc.findRate('GBP', 'SAR', new Date('2026-07-12'));
   t.ok(result, 'found a rate');
-  t.equal(result!.rate, 4.8, 'uses rate from July 10, not July 15');
+  t.equal(result!.rate, '4.8', 'uses rate from July 10, not July 15');
   t.end();
 });
 
@@ -160,7 +160,11 @@ test('FXService: findRate - inverse pair lookup', async (t) => {
   });
   const result = await svc.findRate('USD', 'SAR', new Date('2026-07-20'));
   t.ok(result, 'found via inverse pair');
-  t.ok(result!.rate > 3.7 && result!.rate < 3.8, 'inverse rate ~3.75 (1/0.2667)');
+  t.ok(result!.derived, 'inverse rate marked as derived');
+  t.ok(
+    result!.rate.startsWith('3.74') || result!.rate.startsWith('3.75'),
+    `inverse rate is exact decimal near 3.75 (1/0.2667), got ${result!.rate}`
+  );
   t.end();
 });
 
