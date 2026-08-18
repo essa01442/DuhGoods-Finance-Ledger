@@ -69,12 +69,21 @@ const frappeBooksConfig = {
     installerIcon: 'build/installericon.ico',
     uninstallerIcon: 'build/uninstallericon.ico',
     publish: ['github'],
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: 'DuhGoods',
+    runAfterFinish: true,
   },
   linux: {
     icon: 'build/icons',
     artifactName: '${productName}-v${version}-linux-${arch}.${ext}',
     category: 'Finance',
     publish: ['github'],
+    desktop: {
+      Name: 'DuhGoods',
+      Comment: 'محاسبة DuhGoods — تقارير وموازنات بكل عملة كما هي',
+      Categories: 'Finance;Office;',
+    },
     target: [
       {
         target: 'deb',
